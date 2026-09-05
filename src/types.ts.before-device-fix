@@ -21,18 +21,6 @@ export interface RiverTelemetry {
   received_at?: string;
 }
 
-// Heartbeat/status packet published by the physical IoT device.
-// Example topic: digitaltwin/lokasi1/status
-export interface DeviceStatus {
-  device: string;
-  location: string;
-  message: 'online' | 'offline' | string;
-  send_interval_sec: number;
-  timestamp: string;
-  connection: string;
-  received_at?: string;
-}
-
 export type RaftingSafetyStatus = 'AMAN' | 'WASPADA' | 'SIAGA' | 'BAHAYA';
 
 export interface RaftingAssessment {
@@ -54,9 +42,7 @@ export interface ThresholdConfig {
   waterLevelBahaya: number; // e.g. 3.2 m
   rainExtreme1H: number; // e.g. 25 mm/h
   rainExtreme24H: number; // e.g. 60 mm/24h
-  // Stored internally as m/s to preserve the MQTT/firmware contract.
-  // UI converts this value to km/jam.
-  windExtremeMs: number; // e.g. 10 m/s = 36 km/jam
+  windExtremeMs: number; // e.g. 12 m/s
 }
 
 export interface SystemSettings {
@@ -89,16 +75,6 @@ export interface SystemStatus {
   mqttConnected: boolean;
   mqttBroker: string;
   mqttTopic: string;
-  deviceOnline?: boolean;
-  deviceId?: string;
-  deviceLocation?: string;
-  deviceConnection?: string;
-  deviceLastSeen?: string;
-  deviceStatusFreshnessSec?: number;
-  deviceHeartbeatIntervalSec?: number;
-  deviceStatusTimeoutSec?: number;
-  deviceStatusTopic?: string;
-  deviceStatusMessage?: string;
   connectionCheckIntervalSec: number;
   lastConnectionCheckTime?: string;
   connectionHealth?: 'optimal' | 'idle' | 'warning' | 'disconnected';
