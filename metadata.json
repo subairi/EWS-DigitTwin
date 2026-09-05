@@ -1,0 +1,6 @@
+{
+  "name": "Sistem Monitoring Air Sungai & Cuaca - Arung Jeram",
+  "description": "Sistem pemantauan real-time kondisi cuaca dan ketinggian air sungai untuk mitigasi bencana banjir dan keselamatan wisata arung jeram via MQTT broker.emqx.io, MongoDB Atlas, dan Telegram Bot alert.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
