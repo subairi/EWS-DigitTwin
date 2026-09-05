@@ -6,11 +6,12 @@ import mqtt, { MqttClient } from 'mqtt';
 import { MongoClient, Db } from 'mongodb';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
-import { RiverTelemetry, AlertEvent, ThresholdConfig, SystemSettings, SystemStatus } from './src/types';
+import { RiverTelemetry, DeviceStatus, AlertEvent, ThresholdConfig, SystemSettings, SystemStatus } from './src/types';
 
 dotenv.config();
 
 const PORT = Number(process.env.PORT) || 10000;
+const DEVICE_STATUS_TOPIC = (process.env.MQTT_STATUS_TOPIC || 'digitaltwin/lokasi1/status').trim();
 const app = express();
 app.use(express.json());
 
@@ -22,6 +23,8 @@ let activeMqttClient: MqttClient | null = null;
 let mongoClient: MongoClient | null = null;
 let mongoDb: Db | null = null;
 let isMongoConnected = false;
+let latestDeviceStatus: DeviceStatus | null = null;
+let lastDeviceStatusReceivedAt = 0;
 
 // Settings with defaults
 const defaultThresholds: ThresholdConfig = {
@@ -201,6 +204,66 @@ function broadcastToClients(type: string, payload: unknown) {
   });
 }
 
+function getDeviceStatusSnapshot() {
+  const heartbeatIntervalSec = Math.max(1, Number(latestDeviceStatus?.send_interval_sec || 10));
+  const timeoutSec = Math.max(30, heartbeatIntervalSec * 3);
+  const freshnessSec = lastDeviceStatusReceivedAt > 0
+    ? Math.max(0, Math.round((Date.now() - lastDeviceStatusReceivedAt) / 1000))
+    : undefined;
+
+  const deviceOnline = Boolean(
+    latestDeviceStatus?.message?.toLowerCase() === 'online' &&
+    typeof freshnessSec === 'number' &&
+    freshnessSec <= timeoutSec
+  );
+
+  return {
+    deviceOnline,
+    deviceId: latestDeviceStatus?.device,
+    deviceLocation: latestDeviceStatus?.location,
+    deviceConnection: latestDeviceStatus?.connection,
+    deviceLastSeen: latestDeviceStatus?.received_at,
+    deviceStatusFreshnessSec: freshnessSec,
+    deviceHeartbeatIntervalSec: heartbeatIntervalSec,
+    deviceStatusTimeoutSec: timeoutSec,
+    deviceStatusTopic: DEVICE_STATUS_TOPIC,
+    deviceStatusMessage: deviceOnline ? 'online' : 'offline',
+  };
+}
+
+function processIncomingDeviceStatus(rawPayload: unknown) {
+  try {
+    const data: Partial<DeviceStatus> = typeof rawPayload === 'string'
+      ? JSON.parse(rawPayload)
+      : rawPayload as Partial<DeviceStatus>;
+
+    if (!data || !data.device || !data.message) {
+      console.warn('[MQTT STATUS] Invalid device status packet:', rawPayload);
+      return;
+    }
+
+    latestDeviceStatus = {
+      device: String(data.device),
+      location: String(data.location || 'lokasi1'),
+      message: String(data.message).toLowerCase(),
+      send_interval_sec: Math.max(1, Number(data.send_interval_sec || 10)),
+      timestamp: String(data.timestamp || new Date().toISOString().replace('T', ' ').substring(0, 19)),
+      connection: String(data.connection || 'unknown'),
+      received_at: new Date().toISOString(),
+    };
+    lastDeviceStatusReceivedAt = Date.now();
+
+    const snapshot = getDeviceStatusSnapshot();
+    console.log(
+      `[MQTT DEVICE] ${latestDeviceStatus.device} | ${latestDeviceStatus.location} | ` +
+      `${snapshot.deviceOnline ? 'ONLINE' : 'OFFLINE'} | ${latestDeviceStatus.connection}`
+    );
+    broadcastToClients('device:status', snapshot);
+  } catch (err) {
+    console.error('[MQTT STATUS] Error processing device status:', err);
+  }
+}
+
 // Telegram Alert Dispatcher
 async function sendTelegramAlert(title: string, message: string, severity: 'info' | 'warning' | 'critical', details: RiverTelemetry) {
   if (!currentSettings.telegramEnabled || !currentSettings.telegramBotToken || !currentSettings.telegramChatId) {
@@ -220,7 +283,7 @@ ${message}
 📍 *Lokasi*: ${details.location} (${details.device})
 🌊 *Ketinggian Air*: \`${details.river_level_m.toFixed(2)} m\`
 🌧️ *Curah Hujan (1 Jam)*: \`${details.rain_mm_1H} mm\`
-💨 *Kecepatan Angin*: \`${details.wind_ms} m/s\`
+💨 *Kecepatan Angin*: \`${(details.wind_ms * 3.6).toFixed(1)} km/jam\`
 🌡️ *Suhu / Kelembaban*: \`${details.temperature_c}°C / ${details.humidity_percent}%\`
 🔋 *Baterai Sensor*: \`${details.battery_percent}% (${details.battery_status})\`
 ⏱️ *Waktu Sensor*: \`${details.timestamp}\`
@@ -457,8 +520,8 @@ async function evaluateAlerts(telemetry: RiverTelemetry) {
         type: 'wind',
         severity: telemetry.wind_ms >= 15 ? 'critical' : 'warning',
         title: 'Kecepatan Angin Kencang / Ekstrem!',
-        message: `Kecepatan angin mencapai ${telemetry.wind_ms} m/s (${(telemetry.wind_ms * 3.6).toFixed(1)} km/jam).`,
-        metricValue: `${telemetry.wind_ms} m/s`,
+        message: `Kecepatan angin mencapai ${(telemetry.wind_ms * 3.6).toFixed(1)} km/jam.`,
+        metricValue: `${(telemetry.wind_ms * 3.6).toFixed(1)} km/jam`,
         parameter: 'wind',
         newStatus: 'EXTREME',
       });
@@ -470,8 +533,8 @@ async function evaluateAlerts(telemetry: RiverTelemetry) {
         type: 'wind',
         severity: telemetry.wind_ms >= 15 ? 'critical' : 'warning',
         title: 'Kecepatan Angin Kencang / Ekstrem!',
-        message: `Kondisi angin BERUBAH ke KENCANG! Kecepatan angin mencapai ${telemetry.wind_ms} m/s (${(telemetry.wind_ms * 3.6).toFixed(1)} km/jam). Waspadai pohon tumbang di jalur arung jeram!`,
-        metricValue: `${telemetry.wind_ms} m/s`,
+        message: `Kondisi angin BERUBAH ke KENCANG! Kecepatan angin mencapai ${(telemetry.wind_ms * 3.6).toFixed(1)} km/jam. Waspadai pohon tumbang di jalur arung jeram!`,
+        metricValue: `${(telemetry.wind_ms * 3.6).toFixed(1)} km/jam`,
         parameter: 'wind',
         newStatus: 'EXTREME',
       });
@@ -645,6 +708,7 @@ function performConnectionCheck() {
     : sensorFreshnessSec <= currentSettings.connectionCheckIntervalSec * 2
     ? 'optimal'
     : 'idle';
+  const deviceStatusSnapshot = getDeviceStatusSnapshot();
 
   broadcastToClients('mqtt:status', {
     connected: isConnected,
@@ -659,6 +723,7 @@ function performConnectionCheck() {
     totalDuplicateAlertsSuppressed: lastSentTelegramState.totalDuplicateAlertsSuppressed,
     lastSentTelegramWaterStatus: lastSentTelegramState.waterStatus || undefined,
   });
+  broadcastToClients('device:status', deviceStatusSnapshot);
 }
 
 function startConnectionCheckTimer(intervalSec: number) {
@@ -737,10 +802,28 @@ function initMqtt(brokerUrl: string, topic: string) {
       startConnectionCheckTimer(currentSettings.connectionCheckIntervalSec);
     });
 
-    activeMqttClient.on('message', (receivedTopic, payload) => {
+    activeMqttClient.on('message', async (receivedTopic, payload) => {
       try {
         const str = payload.toString();
-        processIncomingTelemetry(str);
+        console.log(`[MQTT RX] ${receivedTopic}`);
+
+        // Device heartbeat/status packets are not sensor telemetry.
+        if (receivedTopic === DEVICE_STATUS_TOPIC || receivedTopic.endsWith('/status')) {
+          processIncomingDeviceStatus(str);
+          return;
+        }
+
+        // Sensor telemetry packets.
+        if (
+          receivedTopic === currentSettings.mqttTopic ||
+          receivedTopic.endsWith('/data') ||
+          receivedTopic.startsWith('river/telemetry/')
+        ) {
+          await processIncomingTelemetry(str);
+          return;
+        }
+
+        console.log(`[MQTT] Topic diabaikan: ${receivedTopic}`);
       } catch (err) {
         console.error(`Error handling MQTT message on ${receivedTopic}:`, err);
       }
@@ -840,6 +923,7 @@ wss.on('connection', (ws) => {
         mqttConnected: activeMqttClient?.connected || false,
         mqttBroker: currentSettings.mqttBrokerUrl,
         mqttTopic: currentSettings.mqttTopic,
+        ...getDeviceStatusSnapshot(),
         connectionCheckIntervalSec: currentSettings.connectionCheckIntervalSec,
         lastConnectionCheckTime,
         connectionHealth: activeMqttClient?.connected ? 'optimal' : 'disconnected',
@@ -882,6 +966,7 @@ app.get('/api/status', (_req, res) => {
     mqttConnected: isConnected,
     mqttBroker: currentSettings.mqttBrokerUrl,
     mqttTopic: currentSettings.mqttTopic,
+    ...getDeviceStatusSnapshot(),
     connectionCheckIntervalSec: currentSettings.connectionCheckIntervalSec,
     lastConnectionCheckTime,
     connectionHealth: isConnected ? 'optimal' : 'disconnected',
@@ -901,6 +986,10 @@ app.get('/api/status', (_req, res) => {
     uptimeSeconds: Math.floor((Date.now() - appStartTime) / 1000),
   };
   res.json(status);
+});
+
+app.get('/api/device/status', (_req, res) => {
+  res.json(getDeviceStatusSnapshot());
 });
 
 // 2. Latest Telemetry
@@ -1008,6 +1097,7 @@ app.get('/api/telemetry/export-csv', async (req, res) => {
       'Rain_1H_mm',
       'Rain_24H_mm',
       'Wind_Speed_ms',
+      'Wind_Speed_kmh',
       'Temperature_C',
       'Humidity_Percent',
       'Battery_Voltage_V',
@@ -1028,6 +1118,7 @@ app.get('/api/telemetry/export-csv', async (req, res) => {
       t.rain_mm_1H,
       t.rain_mm_24H,
       t.wind_ms,
+      Number((t.wind_ms * 3.6).toFixed(1)),
       t.temperature_c,
       t.humidity_percent,
       t.battery_voltage_v,

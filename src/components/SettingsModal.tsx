@@ -416,13 +416,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-600 dark:text-slate-400 mb-1 font-medium">Angin Kencang (m/s)</label>
+                <label className="block text-slate-600 dark:text-slate-400 mb-1 font-medium">Angin Kencang (km/jam)</label>
                 <input
                   type="number"
-                  value={formData.thresholds.windExtremeMs}
+                  min="0"
+                  step="0.5"
+                  value={(formData.thresholds.windExtremeMs * 3.6).toFixed(1)}
                   onChange={(e) => setFormData({
                     ...formData,
-                    thresholds: { ...formData.thresholds, windExtremeMs: Number(e.target.value) }
+                    thresholds: { ...formData.thresholds, windExtremeMs: Number(e.target.value) / 3.6 }
                   })}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200/90 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/80 text-slate-900 dark:text-white"
                 />

@@ -85,10 +85,9 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry }) => {
           <div className="mt-3.5">
             <div className="flex items-baseline gap-1.5">
               <span className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                {telemetry.wind_ms}
+                {(telemetry.wind_ms * 3.6).toFixed(1)}
               </span>
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">m/s</span>
-              <span className="text-xs text-slate-400 ml-1">({(telemetry.wind_ms * 3.6).toFixed(1)} km/j)</span>
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">km/jam</span>
             </div>
 
             <div className="mt-3 flex items-center justify-between text-xs py-1.5 px-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/60">

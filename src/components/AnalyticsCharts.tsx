@@ -50,7 +50,7 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({
       river_level: item.river_level_m,
       rain_1h: item.rain_mm_1H,
       rain_24h: item.rain_mm_24H,
-      wind_speed: item.wind_ms,
+      wind_speed: Number((item.wind_ms * 3.6).toFixed(1)),
       temperature: item.temperature_c,
       humidity: item.humidity_percent,
       battery_pct: item.battery_percent,
@@ -249,7 +249,7 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({
             <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.6} />
               <XAxis dataKey="time" tick={{ fontSize: 11 }} stroke="#94a3b8" />
-              <YAxis yAxisId="wind" unit="m/s" tick={{ fontSize: 11 }} stroke="#0d9488" />
+              <YAxis yAxisId="wind" unit=" km/j" tick={{ fontSize: 11 }} stroke="#0d9488" />
               <YAxis yAxisId="temp" orientation="right" unit="°C" tick={{ fontSize: 11 }} stroke="#f97316" />
               <Tooltip
                 contentStyle={{
@@ -263,12 +263,12 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({
               <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '6px' }} />
               <ReferenceLine
                 yAxisId="wind"
-                y={thresholds.windExtremeMs}
-                label={{ value: 'Angin Kencang (10 m/s)', fill: '#e11d48', fontSize: 10 }}
+                y={thresholds.windExtremeMs * 3.6}
+                label={{ value: `Angin Kencang (${(thresholds.windExtremeMs * 3.6).toFixed(1)} km/jam)`, fill: '#e11d48', fontSize: 10 }}
                 stroke="#e11d48"
                 strokeDasharray="4 4"
               />
-              <Line yAxisId="wind" type="monotone" dataKey="wind_speed" name="Kecepatan Angin (m/s)" stroke="#0d9488" strokeWidth={2} dot={false} />
+              <Line yAxisId="wind" type="monotone" dataKey="wind_speed" name="Kecepatan Angin (km/jam)" stroke="#0d9488" strokeWidth={2} dot={false} />
               <Line yAxisId="temp" type="monotone" dataKey="temperature" name="Suhu Udara (°C)" stroke="#ea580c" strokeWidth={2} dot={false} />
               <Line yAxisId="wind" type="monotone" dataKey="humidity" name="Kelembaban (%)" stroke="#0284c7" strokeWidth={1.5} dot={false} strokeDasharray="3 3" />
             </LineChart>

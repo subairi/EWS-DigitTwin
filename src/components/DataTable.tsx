@@ -103,7 +103,7 @@ export const DataTable: React.FC<DataTableProps> = ({
               <th className="py-3 px-3.5 border-b border-slate-200/80 dark:border-slate-700/80">Waktu</th>
               <th className="py-3 px-3.5 border-b border-slate-200/80 dark:border-slate-700/80">Level Air (m)</th>
               <th className="py-3 px-3.5 border-b border-slate-200/80 dark:border-slate-700/80">Hujan 1J / 24J</th>
-              <th className="py-3 px-3.5 border-b border-slate-200/80 dark:border-slate-700/80">Angin (m/s)</th>
+              <th className="py-3 px-3.5 border-b border-slate-200/80 dark:border-slate-700/80">Angin (km/jam)</th>
               <th className="py-3 px-3.5 border-b border-slate-200/80 dark:border-slate-700/80">Suhu & Lembab</th>
               <th className="py-3 px-3.5 border-b border-slate-200/80 dark:border-slate-700/80">Baterai</th>
               <th className="py-3 px-3.5 border-b border-slate-200/80 dark:border-slate-700/80">Sinyal</th>
@@ -144,7 +144,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                       {row.rain_mm_1H} / {row.rain_mm_24H} mm
                     </td>
                     <td className="py-3 px-3.5 font-medium whitespace-nowrap">
-                      {row.wind_ms} m/s
+                      {(row.wind_ms * 3.6).toFixed(1)} km/jam
                     </td>
                     <td className="py-3 px-3.5 whitespace-nowrap">
                       {row.temperature_c}°C / {row.humidity_percent}%

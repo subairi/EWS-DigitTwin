@@ -303,18 +303,19 @@ export const SimulatorModal: React.FC<SimulatorModalProps> = ({
               <div className="flex justify-between items-center mb-1.5">
                 <span className="font-semibold text-slate-800 dark:text-slate-200">Kecepatan Angin:</span>
                 <span className="font-mono font-bold text-teal-600 dark:text-teal-400 text-sm">
-                  {formData.wind_ms} m/s
+                  {((formData.wind_ms || 0) * 3.6).toFixed(1)} km/jam
                 </span>
               </div>
               <input
                 type="range"
-                min="0.5"
-                max="25"
+                min="1.8"
+                max="90"
                 step="0.5"
-                value={formData.wind_ms}
-                onChange={(e) => setFormData({ ...formData, wind_ms: parseFloat(e.target.value) })}
+                value={(formData.wind_ms || 0) * 3.6}
+                onChange={(e) => setFormData({ ...formData, wind_ms: parseFloat(e.target.value) / 3.6 })}
                 className="w-full accent-teal-600 cursor-pointer"
               />
+              <p className="mt-1 text-[10px] text-slate-400">Payload MQTT tetap memakai wind_ms (m/s); tampilan memakai km/jam.</p>
             </div>
           </div>
 

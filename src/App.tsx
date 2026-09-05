@@ -83,9 +83,11 @@ export default function App() {
   const [history, setHistory] = useState<RiverTelemetry[]>([]);
   const [alerts, setAlerts] = useState<AlertEvent[]>([]);
   const [status, setStatus] = useState<SystemStatus>({
-    mqttConnected: true,
+    mqttConnected: false,
     mqttBroker: 'mqtt://broker.emqx.io:1883',
     mqttTopic: 'digitaltwin/lokasi1/data',
+    deviceOnline: false,
+    deviceStatusTopic: 'digitaltwin/lokasi1/status',
     connectionCheckIntervalSec: 15,
     lastConnectionCheckTime: new Date().toISOString(),
     connectionHealth: 'optimal',
@@ -244,7 +246,11 @@ export default function App() {
         socketRef.current = ws;
 
         ws.onopen = () => {
-          setStatus((prev) => ({ ...prev, mqttConnected: true }));
+          // Browser -> backend WebSocket success is different from backend -> MQTT broker status.
+          fetch('/api/status')
+            .then((r) => r.json())
+            .then((s) => setStatus(s))
+            .catch(() => {});
         };
 
         ws.onmessage = (event) => {
@@ -276,6 +282,20 @@ export default function App() {
                 totalTelegramDispatched: data.payload.totalTelegramDispatched ?? prev.totalTelegramDispatched,
                 totalDuplicateAlertsSuppressed: data.payload.totalDuplicateAlertsSuppressed ?? prev.totalDuplicateAlertsSuppressed,
                 lastSentTelegramWaterStatus: data.payload.lastSentTelegramWaterStatus || prev.lastSentTelegramWaterStatus,
+              }));
+            } else if (data.type === 'device:status') {
+              setStatus((prev) => ({
+                ...prev,
+                deviceOnline: data.payload.deviceOnline ?? false,
+                deviceId: data.payload.deviceId ?? prev.deviceId,
+                deviceLocation: data.payload.deviceLocation ?? prev.deviceLocation,
+                deviceConnection: data.payload.deviceConnection ?? prev.deviceConnection,
+                deviceLastSeen: data.payload.deviceLastSeen ?? prev.deviceLastSeen,
+                deviceStatusFreshnessSec: data.payload.deviceStatusFreshnessSec,
+                deviceHeartbeatIntervalSec: data.payload.deviceHeartbeatIntervalSec ?? prev.deviceHeartbeatIntervalSec,
+                deviceStatusTimeoutSec: data.payload.deviceStatusTimeoutSec ?? prev.deviceStatusTimeoutSec,
+                deviceStatusTopic: data.payload.deviceStatusTopic ?? prev.deviceStatusTopic,
+                deviceStatusMessage: data.payload.deviceStatusMessage ?? prev.deviceStatusMessage,
               }));
             } else if (data.type === 'mongo:status') {
               setStatus((prev) => ({ ...prev, mongoConnected: data.payload.connected, mongoDatabaseName: data.payload.dbName }));

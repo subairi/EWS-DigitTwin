@@ -741,18 +741,19 @@ export const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
 
               <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40 space-y-2">
                 <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
-                  Kecepatan Angin Maksimal (m/s)
+                  Kecepatan Angin Maksimal (km/jam)
                 </label>
                 <div className="flex items-center gap-3">
                   <input
                     type="number"
-                    min="5"
-                    max="30"
-                    value={th.windExtremeMs || 10}
-                    onChange={(e) => handleThresholdChange('windExtremeMs', parseFloat(e.target.value) || 10)}
+                    min="18"
+                    max="108"
+                    step="0.5"
+                    value={((th.windExtremeMs || 10) * 3.6).toFixed(1)}
+                    onChange={(e) => handleThresholdChange('windExtremeMs', (parseFloat(e.target.value) || 36) / 3.6)}
                     className="w-32 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold text-sm"
                   />
-                  <span className="text-xs text-slate-500">m/s</span>
+                  <span className="text-xs text-slate-500">km/jam</span>
                 </div>
                 <p className="text-[11px] text-slate-500">Batas angin kencang berbahaya bagi pohon tumbang di bibir sungai.</p>
               </div>
