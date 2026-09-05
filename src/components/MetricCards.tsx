@@ -31,7 +31,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry }) => {
         <div>
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Presipitasi Hulu
+              Curah Hujan
             </span>
             <div className="p-2.5 rounded-xl bg-sky-50 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400 border border-sky-100 dark:border-sky-900/50">
               <CloudRain className="h-4 w-4" />
@@ -117,7 +117,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry }) => {
         <div>
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Mikroklimat Hulu
+              Suhu & Kelembapan
             </span>
             <div className="p-2.5 rounded-xl bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-400 border border-orange-100 dark:border-orange-900/50">
               <Thermometer className="h-4 w-4" />
@@ -166,7 +166,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry }) => {
         <div>
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Daya Sensor Hulu
+              Batt. Persen
             </span>
             <div 
               className={`p-2.5 rounded-xl border ${

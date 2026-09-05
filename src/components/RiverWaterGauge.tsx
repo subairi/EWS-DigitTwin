@@ -39,11 +39,11 @@ export const RiverWaterGauge: React.FC<RiverWaterGaugeProps> = ({
       <div className="flex items-center justify-between pb-3.5 border-b border-slate-100 dark:border-slate-800">
         <div>
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            Water Column Sensor
+            Water Level Sensor
           </span>
           <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mt-0.5">
             <Waves className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-            Kolom Ketinggian Air Hulu
+            Level Air Hulu Sungai
           </h3>
         </div>
 
