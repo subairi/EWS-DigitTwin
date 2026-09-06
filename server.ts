@@ -104,6 +104,17 @@ function getPersistableSettings() {
   };
 }
 
+function getPublicSettings() {
+  return {
+    ...currentSettings,
+    telegramBotToken: currentSettings.telegramBotToken
+      ? '••••••••' + currentSettings.telegramBotToken.slice(-4)
+      : '',
+    mongoUri: currentSettings.mongoUri ? 'mongodb+srv://••••••••' : '',
+    thresholds: { ...currentSettings.thresholds },
+  };
+}
+
 async function persistSettingsToMongo(): Promise<boolean> {
   if (!mongoDb || !isMongoConnected) {
     console.warn('[Settings] MongoDB belum terhubung; konfigurasi hanya tersimpan sementara di RAM.');
@@ -141,10 +152,6 @@ async function loadSettingsFromMongo(): Promise<boolean> {
       return false;
     }
 
-    const prevBroker = currentSettings.mqttBrokerUrl;
-    const prevTopic = currentSettings.mqttTopic;
-    const prevInterval = currentSettings.connectionCheckIntervalSec;
-
     if (typeof saved.mqttBrokerUrl === 'string' && saved.mqttBrokerUrl) {
       currentSettings.mqttBrokerUrl = normalizeMqttUrl(saved.mqttBrokerUrl);
     }
@@ -170,14 +177,6 @@ async function loadSettingsFromMongo(): Promise<boolean> {
     }
 
     console.log('[Settings] Konfigurasi berhasil dimuat dari MongoDB.');
-
-    if (currentSettings.connectionCheckIntervalSec !== prevInterval) {
-      startConnectionCheckTimer(currentSettings.connectionCheckIntervalSec);
-    }
-    if (currentSettings.mqttBrokerUrl !== prevBroker || currentSettings.mqttTopic !== prevTopic) {
-      initMqtt(currentSettings.mqttBrokerUrl, currentSettings.mqttTopic);
-    }
-
     return true;
   } catch (err) {
     console.error('[Settings] Gagal memuat konfigurasi dari MongoDB:', (err as Error).message);
@@ -1019,10 +1018,7 @@ wss.on('connection', (ws) => {
       latest: latestTelemetry,
       history: telemetryHistory.slice(-100),
       alerts: alertHistory.slice(0, 30),
-      settings: {
-        ...currentSettings,
-        telegramBotToken: currentSettings.telegramBotToken ? '••••••••' + currentSettings.telegramBotToken.slice(-4) : '',
-      },
+      settings: getPublicSettings(),
       status: {
         mqttConnected: activeMqttClient?.connected || false,
         mqttBroker: currentSettings.mqttBrokerUrl,
@@ -1296,11 +1292,7 @@ _Broker MQTT_: \`${currentSettings.mqttBrokerUrl}\``;
 
 // 8. Get & Update Settings
 app.get('/api/settings', (_req, res) => {
-  res.json({
-    ...currentSettings,
-    telegramBotToken: currentSettings.telegramBotToken ? '••••••••' + currentSettings.telegramBotToken.slice(-4) : '',
-    mongoUri: currentSettings.mongoUri ? 'mongodb+srv://••••••••' : '',
-  });
+  res.json(getPublicSettings());
 });
 
 app.post('/api/settings', async (req, res) => {
@@ -1348,9 +1340,12 @@ app.post('/api/settings', async (req, res) => {
     }
 
     const persisted = await persistSettingsToMongo();
+    const publicSettings = getPublicSettings();
+    broadcastToClients('settings:update', publicSettings);
     res.json({
       success: true,
       persisted,
+      settings: publicSettings,
       message: persisted
         ? 'Pengaturan berhasil disimpan permanen ke MongoDB'
         : 'Pengaturan diperbarui, tetapi belum tersimpan permanen karena MongoDB tidak terhubung',
@@ -1360,14 +1355,17 @@ app.post('/api/settings', async (req, res) => {
   }
 });
 
-// Start MQTT and MongoDB
-initMqtt(currentSettings.mqttBrokerUrl, currentSettings.mqttTopic);
-if (currentSettings.mongoUri) {
-  initMongo(currentSettings.mongoUri);
-}
-
 // Vite Middleware for Development, Static Serving for Production
 async function start() {
+  // Load persisted configuration before the dashboard can request /api/settings.
+  // This eliminates the startup race that previously returned default values first.
+  if (currentSettings.mongoUri) {
+    await initMongo(currentSettings.mongoUri);
+  }
+
+  // MQTT starts only after persisted broker/topic/interval settings are available.
+  initMqtt(currentSettings.mqttBrokerUrl, currentSettings.mqttTopic);
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
