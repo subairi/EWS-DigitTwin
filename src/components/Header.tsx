@@ -14,13 +14,17 @@ import {
   ShieldAlert,
   Laptop,
   CheckCircle2,
-  LayoutDashboard
+  LayoutDashboard,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { SystemStatus, RiverTelemetry } from '../types';
 
 interface HeaderProps {
   status: SystemStatus;
   latest: RiverTelemetry;
+  theme: 'light' | 'dark';
+  onToggleTheme: () => void;
   soundMuted: boolean;
   onToggleSound: () => void;
   pushEnabled: boolean;
@@ -40,6 +44,8 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   status,
   latest,
+  theme,
+  onToggleTheme,
   soundMuted,
   onToggleSound,
   pushEnabled,
@@ -208,6 +214,25 @@ export const Header: React.FC<HeaderProps> = ({
               <Send className={`h-3.5 w-3.5 ${status.telegramConfigured ? 'text-sky-500' : 'text-slate-400'}`} />
               <span>Telegram: {status.telegramConfigured ? 'EWS Siap' : 'Off'}</span>
             </div>
+
+            {/* Light / Dark Theme Toggle */}
+            <button
+              id="btn-toggle-theme"
+              type="button"
+              onClick={onToggleTheme}
+              className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-slate-200/90 bg-white text-slate-700 hover:bg-slate-50 transition-colors dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700/80"
+              title={theme === 'dark' ? 'Ganti ke Mode Terang' : 'Ganti ke Mode Gelap'}
+              aria-label={theme === 'dark' ? 'Aktifkan mode terang' : 'Aktifkan mode gelap'}
+            >
+              {theme === 'dark' ? (
+                <Moon className="h-4 w-4 text-indigo-300" />
+              ) : (
+                <Sun className="h-4 w-4 text-amber-500" />
+              )}
+              <span className="hidden sm:inline text-xs font-semibold">
+                {theme === 'dark' ? 'Gelap' : 'Terang'}
+              </span>
+            </button>
 
             {/* Audio Siren Toggle */}
             <button
