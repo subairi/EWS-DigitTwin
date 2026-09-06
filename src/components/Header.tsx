@@ -33,6 +33,7 @@ interface HeaderProps {
   onOpenSimulator: () => void;
   onExportCsv: () => void;
   isExporting: boolean;
+  csvRange: '1d' | '7d' | '30d' | 'all';
   currentPage?: 'dashboard' | 'configuration';
   onNavigate?: (page: 'dashboard' | 'configuration') => void;
   isAlarmSounding?: boolean;
@@ -54,6 +55,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSimulator,
   onExportCsv,
   isExporting,
+  csvRange,
   currentPage = 'dashboard',
   onNavigate,
   isAlarmSounding = false,
@@ -61,6 +63,8 @@ export const Header: React.FC<HeaderProps> = ({
   activeAlarmSignature,
   onAcknowledgeAlarm,
 }) => {
+  const csvRangeShortLabel = { '1d': '1H', '7d': '7H', '30d': '30H', all: 'ALL' }[csvRange];
+
   return (
     <header className="border-b border-slate-200/80 bg-white/95 backdrop-blur-md sticky top-0 z-40 shadow-xs dark:bg-slate-900/95 dark:border-slate-800/80">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
@@ -283,10 +287,10 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={onExportCsv}
               disabled={isExporting}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 active:bg-black text-white text-xs font-semibold shadow-xs transition-colors dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white disabled:opacity-50"
-              title="Download riwayat data sensor format CSV"
+              title={`Download CSV rentang ${csvRange === 'all' ? 'Semua Data' : csvRange === '1d' ? '1 Hari' : csvRange === '7d' ? '7 Hari' : '30 Hari'}`}
             >
               <Download className="h-3.5 w-3.5" />
-              <span>{isExporting ? '...' : 'CSV'}</span>
+              <span>{isExporting ? '...' : `CSV ${csvRangeShortLabel}`}</span>
             </button>
 
             {/* Settings Page Quick Link Button */}

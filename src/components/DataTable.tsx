@@ -12,11 +12,15 @@ import {
 import { RiverTelemetry, ThresholdConfig } from '../types';
 import { formatUptime } from '../utils/safety';
 
+type CsvRange = '1d' | '7d' | '30d' | 'all';
+
 interface DataTableProps {
   history: RiverTelemetry[];
   onExportCsv: () => void;
   isExporting: boolean;
   thresholds: ThresholdConfig;
+  csvRange: CsvRange;
+  onCsvRangeChange: (range: CsvRange) => void;
 }
 
 export const DataTable: React.FC<DataTableProps> = ({
@@ -24,6 +28,8 @@ export const DataTable: React.FC<DataTableProps> = ({
   onExportCsv,
   isExporting,
   thresholds,
+  csvRange,
+  onCsvRangeChange,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortAsc, setSortAsc] = useState(false);
@@ -83,7 +89,26 @@ export const DataTable: React.FC<DataTableProps> = ({
             <span>{sortAsc ? 'Terlama' : 'Terbaru'}</span>
           </button>
 
-          {/* CSV Download Button */}
+          {/* CSV Range + Download */}
+          <div className="flex items-center rounded-xl border border-slate-200/90 dark:border-slate-700/80 bg-white dark:bg-slate-800 shadow-xs overflow-hidden">
+            <label htmlFor="csv-range" className="pl-3 pr-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">
+              Unduh CSV:
+            </label>
+            <select
+              id="csv-range"
+              value={csvRange}
+              onChange={(e) => onCsvRangeChange(e.target.value as CsvRange)}
+              disabled={isExporting}
+              className="py-2 pr-7 pl-1 bg-transparent text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-hidden disabled:opacity-50 cursor-pointer"
+              title="Pilih rentang data MongoDB yang akan diunduh"
+            >
+              <option value="1d">1 Hari</option>
+              <option value="7d">7 Hari</option>
+              <option value="30d">30 Hari</option>
+              <option value="all">Semua</option>
+            </select>
+          </div>
+
           <button
             id="btn-download-csv-table"
             type="button"
@@ -92,7 +117,7 @@ export const DataTable: React.FC<DataTableProps> = ({
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition-colors disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
           >
             <Download className="h-3.5 w-3.5" />
-            <span>{isExporting ? 'Mengunduh...' : 'Unduh CSV'}</span>
+            <span>{isExporting ? 'Mengunduh...' : 'Unduh'}</span>
           </button>
         </div>
       </div>
