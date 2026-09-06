@@ -2,6 +2,7 @@ import React from 'react';
 import { ShieldCheck, AlertTriangle, AlertOctagon, Info, Compass, LifeBuoy, ArrowUpRight } from 'lucide-react';
 import { RiverTelemetry, ThresholdConfig } from '../types';
 import { assessRaftingSafety } from '../utils/safety';
+import { AnimatedNumber } from './AnimatedNumber';
 
 interface RaftingSafetyBannerProps {
   telemetry: RiverTelemetry;
@@ -76,7 +77,7 @@ export const RaftingSafetyBanner: React.FC<RaftingSafetyBannerProps> = ({
                 {assessment.gradeText}
               </span>
               <span className="text-xs text-slate-500 dark:text-slate-400">
-                | Ketinggian Hulu: <strong className="font-semibold text-slate-800 dark:text-slate-100">{telemetry.river_level_m.toFixed(2)} m</strong>
+                | Ketinggian Hulu: <strong className="font-semibold text-slate-800 dark:text-slate-100"><AnimatedNumber value={telemetry.river_level_m} decimals={2} durationMs={700} suffix=" m" /></strong>
               </span>
             </div>
 

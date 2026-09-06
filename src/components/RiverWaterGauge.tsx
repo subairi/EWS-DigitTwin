@@ -1,6 +1,7 @@
 import React from 'react';
 import { Waves, ArrowUp, ArrowDown, Minus } from 'lucide-react';
 import { ThresholdConfig } from '../types';
+import { useAnimatedNumber } from '../hooks/useAnimatedNumber';
 
 interface RiverWaterGaugeProps {
   currentLevel: number;
@@ -13,8 +14,9 @@ export const RiverWaterGauge: React.FC<RiverWaterGaugeProps> = ({
   thresholds,
   previousLevel,
 }) => {
+  const animatedLevel = useAnimatedNumber(currentLevel, 700);
   const maxScale = Math.max(4.5, thresholds.waterLevelBahaya + 1.0);
-  const fillPercent = Math.min(100, Math.max(0, (currentLevel / maxScale) * 100));
+  const fillPercent = Math.min(100, Math.max(0, (animatedLevel / maxScale) * 100));
 
   const diff = typeof previousLevel === 'number' ? +(currentLevel - previousLevel).toFixed(2) : 0;
 
@@ -122,7 +124,7 @@ export const RiverWaterGauge: React.FC<RiverWaterGaugeProps> = ({
         <div className="flex-1 space-y-3.5">
           <div>
             <div className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight flex items-baseline gap-1.5">
-              <span>{currentLevel.toFixed(2)}</span>
+              <span className="tabular-nums">{animatedLevel.toFixed(2)}</span>
               <span className="text-sm font-medium text-slate-500 dark:text-slate-400">meter</span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">

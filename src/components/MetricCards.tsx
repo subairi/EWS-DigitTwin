@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { RiverTelemetry, ThresholdConfig } from '../types';
 import { formatUptime, getSignalQuality } from '../utils/safety';
+import { AnimatedNumber } from './AnimatedNumber';
 
 interface MetricCardsProps {
   telemetry: RiverTelemetry;
@@ -31,7 +32,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry, thresholds 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       {/* 1. Curah Hujan (Rainfall) */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 p-5 shadow-xs relative overflow-hidden flex flex-col justify-between">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 p-5 shadow-xs relative overflow-hidden flex flex-col justify-between transition-colors duration-500">
         <div>
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -44,15 +45,24 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry, thresholds 
 
           <div className="mt-3.5">
             <div className="flex items-baseline gap-1.5">
-              <span className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                {telemetry.rain_mm_1H}
-              </span>
+              <AnimatedNumber
+                value={telemetry.rain_mm_1H}
+                decimals={1}
+                durationMs={600}
+                className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight"
+              />
               <span className="text-xs font-medium text-slate-500 dark:text-slate-400">mm / 1 Jam</span>
             </div>
 
             <div className="mt-3 flex items-center justify-between text-xs py-1.5 px-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/60">
               <span className="text-slate-500 dark:text-slate-400 font-medium">Akumulasi 24 Jam</span>
-              <span className="font-bold text-slate-900 dark:text-slate-100">{telemetry.rain_mm_24H} mm</span>
+              <AnimatedNumber
+                value={telemetry.rain_mm_24H}
+                decimals={1}
+                durationMs={600}
+                suffix=" mm"
+                className="font-bold text-slate-900 dark:text-slate-100"
+              />
             </div>
           </div>
         </div>
@@ -75,7 +85,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry, thresholds 
       </div>
 
       {/* 2. Kecepatan Angin (Wind Speed) */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 p-5 shadow-xs relative overflow-hidden flex flex-col justify-between">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 p-5 shadow-xs relative overflow-hidden flex flex-col justify-between transition-colors duration-500">
         <div>
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -88,9 +98,12 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry, thresholds 
 
           <div className="mt-3.5">
             <div className="flex items-baseline gap-1.5">
-              <span className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                {(telemetry.wind_ms * 3.6).toFixed(1)}
-              </span>
+              <AnimatedNumber
+                value={telemetry.wind_ms * 3.6}
+                decimals={1}
+                durationMs={600}
+                className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight"
+              />
               <span className="text-xs font-medium text-slate-500 dark:text-slate-400">km/jam</span>
             </div>
 
@@ -117,7 +130,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry, thresholds 
       </div>
 
       {/* 3. Suhu & Kelembaban Udara */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 p-5 shadow-xs relative overflow-hidden flex flex-col justify-between">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 p-5 shadow-xs relative overflow-hidden flex flex-col justify-between transition-colors duration-500">
         <div>
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -131,15 +144,18 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry, thresholds 
           <div className="mt-3.5">
             <div className="flex items-baseline gap-2.5">
               <div className="flex items-baseline gap-0.5">
-                <span className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                  {telemetry.temperature_c}
-                </span>
+                <AnimatedNumber
+                  value={telemetry.temperature_c}
+                  decimals={1}
+                  durationMs={600}
+                  className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight"
+                />
                 <span className="text-sm font-medium text-slate-500 dark:text-slate-400">°C</span>
               </div>
               <span className="text-slate-300 dark:text-slate-700">|</span>
               <div className="flex items-baseline gap-1 text-sky-600 dark:text-sky-400 font-semibold text-sm">
                 <Droplets className="h-3.5 w-3.5" />
-                <span>{telemetry.humidity_percent}%</span>
+                <AnimatedNumber value={telemetry.humidity_percent} decimals={1} durationMs={600} suffix="%" />
               </div>
             </div>
 
@@ -186,11 +202,15 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry, thresholds 
           <div className="mt-3.5">
             <div className="flex items-baseline justify-between">
               <div className="flex items-baseline gap-1.5">
-                <span className={`text-3xl font-extrabold tracking-tight ${isBatteryCritical ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}>
-                  {telemetry.battery_percent}%
-                </span>
+                <AnimatedNumber
+                  value={telemetry.battery_percent}
+                  decimals={0}
+                  durationMs={650}
+                  suffix="%"
+                  className={`text-3xl font-extrabold tracking-tight ${isBatteryCritical ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}
+                />
                 <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                  ({telemetry.battery_voltage_v.toFixed(2)}V)
+                  (<AnimatedNumber value={telemetry.battery_voltage_v} decimals={2} durationMs={650} suffix="V" />)
                 </span>
               </div>
 
@@ -208,7 +228,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry, thresholds 
             {/* Battery Level Progress Bar */}
             <div className="mt-3 w-full bg-slate-200/80 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
               <div 
-                className={`h-full transition-all duration-500 ${
+                className={`h-full transition-all duration-700 ease-out ${
                   isBatteryCritical ? 'bg-rose-600' : isBatteryLow ? 'bg-amber-500' : 'bg-emerald-500'
                 }`}
                 style={{ width: `${Math.min(100, Math.max(0, telemetry.battery_percent))}%` }}
