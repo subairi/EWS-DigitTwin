@@ -176,6 +176,15 @@ async function loadSettingsFromMongo(): Promise<boolean> {
       };
     }
 
+    // Keep the initial/in-memory battery label aligned with the persisted thresholds too.
+    if (latestTelemetry) {
+      latestTelemetry.battery_status = latestTelemetry.battery_percent <= currentSettings.thresholds.batteryCritPercent
+        ? 'CRITICAL'
+        : latestTelemetry.battery_percent <= currentSettings.thresholds.batteryLowPercent
+        ? 'LOW'
+        : 'NORMAL';
+    }
+
     console.log('[Settings] Konfigurasi berhasil dimuat dari MongoDB.');
     return true;
   } catch (err) {
@@ -514,7 +523,7 @@ async function evaluateAlerts(telemetry: RiverTelemetry) {
 
   // 2. Evaluate Battery Status
   const currentBatteryStatus: 'NORMAL' | 'LOW' | 'CRITICAL' =
-    (telemetry.battery_status === 'CRITICAL' || telemetry.battery_percent <= th.batteryCritPercent) ? 'CRITICAL' :
+    telemetry.battery_percent <= th.batteryCritPercent ? 'CRITICAL' :
     telemetry.battery_percent <= th.batteryLowPercent ? 'LOW' : 'NORMAL';
 
   if (lastSentTelegramState.batteryStatus === null) {
@@ -525,7 +534,7 @@ async function evaluateAlerts(telemetry: RiverTelemetry) {
         type: 'battery',
         severity: currentBatteryStatus === 'CRITICAL' ? 'critical' : 'warning',
         title: currentBatteryStatus === 'CRITICAL' ? 'Baterai Sensor Kritis!' : 'Baterai Sensor Menipis (Low)',
-        message: `Daya baterai sensor berada di ${telemetry.battery_percent}% (${telemetry.battery_voltage_v.toFixed(2)}V).`,
+        message: `Daya baterai sensor berada di ${telemetry.battery_percent}% (${telemetry.battery_voltage_v.toFixed(2)}V). Ambang Low: ${th.batteryLowPercent}%, Kritis: ${th.batteryCritPercent}%.`,
         metricValue: `${telemetry.battery_percent}%`,
         parameter: 'battery',
         newStatus: currentBatteryStatus,
@@ -539,7 +548,7 @@ async function evaluateAlerts(telemetry: RiverTelemetry) {
         type: 'battery',
         severity: 'critical',
         title: 'Baterai Sensor Kritis!',
-        message: `Status baterai sensor BERUBAH ke KRITIS! Daya tersisa ${telemetry.battery_percent}% (${telemetry.battery_voltage_v.toFixed(2)}V). Segera ganti/isi ulang solar panel!`,
+        message: `Status baterai sensor BERUBAH ke KRITIS! Daya tersisa ${telemetry.battery_percent}% (Ambang Kritis: ${th.batteryCritPercent}%). Segera ganti/isi ulang solar panel!`,
         metricValue: `${telemetry.battery_percent}%`,
         parameter: 'battery',
         newStatus: 'CRITICAL',
@@ -550,7 +559,7 @@ async function evaluateAlerts(telemetry: RiverTelemetry) {
         type: 'battery',
         severity: 'warning',
         title: 'Baterai Sensor Menipis (Low)',
-        message: `Status baterai sensor BERUBAH ke MENIPIS (${telemetry.battery_percent}%). Periksa pasokan daya cadangan.`,
+        message: `Status baterai sensor BERUBAH ke MENIPIS (${telemetry.battery_percent}%). Ambang Low: ${th.batteryLowPercent}%. Periksa pasokan daya cadangan.`,
         metricValue: `${telemetry.battery_percent}%`,
         parameter: 'battery',
         newStatus: 'LOW',
@@ -581,9 +590,9 @@ async function evaluateAlerts(telemetry: RiverTelemetry) {
       alertsToDispatch.push({
         category: 'rain_extreme',
         type: 'rain',
-        severity: telemetry.rain_mm_1H >= 35 ? 'critical' : 'warning',
+        severity: (telemetry.rain_mm_1H >= th.rainExtreme1H && telemetry.rain_mm_24H >= th.rainExtreme24H) ? 'critical' : 'warning',
         title: 'Curah Hujan Hulu Sangat Lebat!',
-        message: `Intensitas hujan di hulu mencapai ${telemetry.rain_mm_1H} mm/jam (24 Jam: ${telemetry.rain_mm_24H} mm). Waspadai kenaikan air susulan.`,
+        message: `Curah hujan melampaui ambang konfigurasi. 1 Jam: ${telemetry.rain_mm_1H} mm (ambang ${th.rainExtreme1H} mm); 24 Jam: ${telemetry.rain_mm_24H} mm (ambang ${th.rainExtreme24H} mm). Waspadai kenaikan air susulan.`,
         metricValue: `${telemetry.rain_mm_1H} mm/jam`,
         parameter: 'rain',
         newStatus: 'EXTREME',
@@ -594,9 +603,9 @@ async function evaluateAlerts(telemetry: RiverTelemetry) {
       alertsToDispatch.push({
         category: 'rain_extreme',
         type: 'rain',
-        severity: telemetry.rain_mm_1H >= 35 ? 'critical' : 'warning',
+        severity: (telemetry.rain_mm_1H >= th.rainExtreme1H && telemetry.rain_mm_24H >= th.rainExtreme24H) ? 'critical' : 'warning',
         title: 'Curah Hujan Hulu Sangat Lebat!',
-        message: `Kondisi curah hujan BERUBAH ke EKSTREM! Intensitas hujan di hulu mencapai ${telemetry.rain_mm_1H} mm/jam (24 Jam: ${telemetry.rain_mm_24H} mm). Waspadai kenaikan air susulan dalam 15-45 menit ke depan.`,
+        message: `Kondisi curah hujan BERUBAH ke EKSTREM! 1 Jam: ${telemetry.rain_mm_1H} mm (ambang ${th.rainExtreme1H} mm); 24 Jam: ${telemetry.rain_mm_24H} mm (ambang ${th.rainExtreme24H} mm). Waspadai kenaikan air susulan.`,
         metricValue: `${telemetry.rain_mm_1H} mm/jam`,
         parameter: 'rain',
         newStatus: 'EXTREME',
@@ -618,9 +627,9 @@ async function evaluateAlerts(telemetry: RiverTelemetry) {
       alertsToDispatch.push({
         category: 'wind_extreme',
         type: 'wind',
-        severity: telemetry.wind_ms >= 15 ? 'critical' : 'warning',
+        severity: 'warning',
         title: 'Kecepatan Angin Kencang / Ekstrem!',
-        message: `Kecepatan angin mencapai ${(telemetry.wind_ms * 3.6).toFixed(1)} km/jam.`,
+        message: `Kecepatan angin mencapai ${(telemetry.wind_ms * 3.6).toFixed(1)} km/jam (ambang ${(th.windExtremeMs * 3.6).toFixed(1)} km/jam).`,
         metricValue: `${(telemetry.wind_ms * 3.6).toFixed(1)} km/jam`,
         parameter: 'wind',
         newStatus: 'EXTREME',
@@ -631,9 +640,9 @@ async function evaluateAlerts(telemetry: RiverTelemetry) {
       alertsToDispatch.push({
         category: 'wind_extreme',
         type: 'wind',
-        severity: telemetry.wind_ms >= 15 ? 'critical' : 'warning',
+        severity: 'warning',
         title: 'Kecepatan Angin Kencang / Ekstrem!',
-        message: `Kondisi angin BERUBAH ke KENCANG! Kecepatan angin mencapai ${(telemetry.wind_ms * 3.6).toFixed(1)} km/jam. Waspadai pohon tumbang di jalur arung jeram!`,
+        message: `Kondisi angin BERUBAH ke KENCANG! Kecepatan angin mencapai ${(telemetry.wind_ms * 3.6).toFixed(1)} km/jam (ambang ${(th.windExtremeMs * 3.6).toFixed(1)} km/jam). Waspadai pohon tumbang di jalur arung jeram!`,
         metricValue: `${(telemetry.wind_ms * 3.6).toFixed(1)} km/jam`,
         parameter: 'wind',
         newStatus: 'EXTREME',
@@ -704,6 +713,13 @@ async function processIncomingTelemetry(rawPayload: unknown) {
       return;
     }
 
+    const batteryPercent = Number(data.battery_percent ?? 50);
+    const batteryStatus = batteryPercent <= currentSettings.thresholds.batteryCritPercent
+      ? 'CRITICAL'
+      : batteryPercent <= currentSettings.thresholds.batteryLowPercent
+      ? 'LOW'
+      : 'NORMAL';
+
     const telemetryRecord: RiverTelemetry = {
       device: data.device || 'AWS-B49793895DC0',
       location: data.location || 'lokasi1',
@@ -719,8 +735,8 @@ async function processIncomingTelemetry(rawPayload: unknown) {
       humidity_percent: Number(data.humidity_percent ?? 70),
       river_level_m: Number(data.river_level_m),
       battery_voltage_v: Number(data.battery_voltage_v ?? 12.0),
-      battery_percent: Number(data.battery_percent ?? 50),
-      battery_status: (data.battery_status || (Number(data.battery_percent) <= 15 ? 'CRITICAL' : 'NORMAL')).toUpperCase(),
+      battery_percent: batteryPercent,
+      battery_status: batteryStatus,
       wifi_rssi: Number(data.wifi_rssi ?? -50),
       gsm_signal: Number(data.gsm_signal ?? 0),
       received_at: new Date().toISOString(),
@@ -1305,6 +1321,22 @@ app.post('/api/settings', async (req, res) => {
 
     if (newSettings.thresholds) {
       currentSettings.thresholds = { ...currentSettings.thresholds, ...newSettings.thresholds };
+
+      // Threshold changes must take effect immediately for every alert category.
+      // Reset transition trackers so the next evaluation uses the new configuration,
+      // rather than retaining a status calculated from an older threshold.
+      lastSentTelegramState.waterStatus = null;
+      lastSentTelegramState.batteryStatus = null;
+      lastSentTelegramState.rainStatus = null;
+      lastSentTelegramState.windStatus = null;
+
+      if (latestTelemetry) {
+        latestTelemetry.battery_status = latestTelemetry.battery_percent <= currentSettings.thresholds.batteryCritPercent
+          ? 'CRITICAL'
+          : latestTelemetry.battery_percent <= currentSettings.thresholds.batteryLowPercent
+          ? 'LOW'
+          : 'NORMAL';
+      }
     }
     if (newSettings.mqttBrokerUrl) currentSettings.mqttBrokerUrl = normalizeMqttUrl(newSettings.mqttBrokerUrl);
     if (newSettings.mqttTopic) currentSettings.mqttTopic = newSettings.mqttTopic.trim();
@@ -1342,6 +1374,12 @@ app.post('/api/settings', async (req, res) => {
     const persisted = await persistSettingsToMongo();
     const publicSettings = getPublicSettings();
     broadcastToClients('settings:update', publicSettings);
+
+    if (newSettings.thresholds && latestTelemetry) {
+      broadcastToClients('telemetry:update', latestTelemetry);
+      await evaluateAlerts(latestTelemetry);
+    }
+
     res.json({
       success: true,
       persisted,
