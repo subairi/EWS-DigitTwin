@@ -103,6 +103,7 @@ export default function App() {
   });
 
   const [settings, setSettings] = useState<SystemSettings>(defaultSettings);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [soundMuted, setSoundMuted] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [activeTimeRange, setActiveTimeRange] = useState('24h');
@@ -151,13 +152,17 @@ export default function App() {
       return updated.slice(-300);
     });
 
-    // Compute Safety Status Signature for Alarm & ACK
+    // Do not evaluate alarms with fallback defaults before persisted settings finish loading.
+    if (!settingsLoaded) return;
+
     const th = settings.thresholds || DEFAULT_THRESHOLDS;
-    const isWaterDanger = telemetry.river_level_m >= (th.waterLevelBahaya || 3.2);
-    const isBatteryCritical = telemetry.battery_status === 'CRITICAL' || telemetry.battery_percent <= (th.batteryCritPercent || 15);
-    const isWaterSiaga = telemetry.river_level_m >= (th.waterLevelSiaga || 2.5);
-    const isRainExtreme = telemetry.rain_mm_1H >= (th.rainExtreme1H || 20);
-    const isBatteryLow = telemetry.battery_status === 'LOW' || telemetry.battery_percent <= (th.batteryLowPercent || 25);
+    const isWaterDanger = telemetry.river_level_m >= th.waterLevelBahaya;
+    const isWaterSiaga = telemetry.river_level_m >= th.waterLevelSiaga;
+    const isWaterWaspada = telemetry.river_level_m >= th.waterLevelWaspada;
+    const isBatteryCritical = telemetry.battery_percent <= th.batteryCritPercent;
+    const isBatteryLow = telemetry.battery_percent <= th.batteryLowPercent;
+    const isRainExtreme = telemetry.rain_mm_1H >= th.rainExtreme1H || telemetry.rain_mm_24H >= th.rainExtreme24H;
+    const isWindExtreme = telemetry.wind_ms >= th.windExtremeMs;
 
     let conditionSig: string | null = null;
     let reason = '';
@@ -165,23 +170,31 @@ export default function App() {
 
     if (isWaterDanger) {
       conditionSig = `WATER_BAHAYA`;
-      reason = `Level Ketinggian Air BAHAYA BANJIR (${telemetry.river_level_m.toFixed(2)} m >= ${th.waterLevelBahaya} m)`;
+      reason = `Level Air BAHAYA (${telemetry.river_level_m.toFixed(2)} m ≥ ${th.waterLevelBahaya} m)`;
       severity = 'critical';
     } else if (isBatteryCritical) {
       conditionSig = `BATTERY_CRITICAL`;
-      reason = `Daya Baterai Sensor Hulu Kritis (${telemetry.battery_percent}% <= ${th.batteryCritPercent}%)`;
+      reason = `Baterai Kritis (${telemetry.battery_percent}% ≤ ${th.batteryCritPercent}%)`;
       severity = 'critical';
     } else if (isWaterSiaga) {
       conditionSig = `WATER_SIAGA`;
-      reason = `Level Ketinggian Air SIAGA (${telemetry.river_level_m.toFixed(2)} m >= ${th.waterLevelSiaga} m)`;
+      reason = `Level Air SIAGA (${telemetry.river_level_m.toFixed(2)} m ≥ ${th.waterLevelSiaga} m)`;
       severity = 'warning';
     } else if (isRainExtreme) {
       conditionSig = `RAIN_EXTREME`;
-      reason = `Curah Hujan Ekstrem di Hulu (${telemetry.rain_mm_1H} mm/jam >= ${th.rainExtreme1H} mm)`;
+      reason = `Curah Hujan Melampaui Ambang (1J ${telemetry.rain_mm_1H}/${th.rainExtreme1H} mm; 24J ${telemetry.rain_mm_24H}/${th.rainExtreme24H} mm)`;
+      severity = 'warning';
+    } else if (isWindExtreme) {
+      conditionSig = `WIND_EXTREME`;
+      reason = `Kecepatan Angin Melampaui Ambang (${(telemetry.wind_ms * 3.6).toFixed(1)} ≥ ${(th.windExtremeMs * 3.6).toFixed(1)} km/jam)`;
       severity = 'warning';
     } else if (isBatteryLow) {
       conditionSig = `BATTERY_LOW`;
-      reason = `Daya Baterai Sensor Hulu Menipis (${telemetry.battery_percent}% <= ${th.batteryLowPercent}%)`;
+      reason = `Baterai Menipis (${telemetry.battery_percent}% ≤ ${th.batteryLowPercent}%)`;
+      severity = 'warning';
+    } else if (isWaterWaspada) {
+      conditionSig = `WATER_WASPADA`;
+      reason = `Level Air WASPADA (${telemetry.river_level_m.toFixed(2)} m ≥ ${th.waterLevelWaspada} m)`;
       severity = 'warning';
     }
 
@@ -207,7 +220,7 @@ export default function App() {
         }
       }
     }
-  }, [settings.thresholds, settings.soundAlertEnabled, soundMuted, acknowledgedAlarmSignature]);
+  }, [settings.thresholds, settings.soundAlertEnabled, settingsLoaded, soundMuted, acknowledgedAlarmSignature]);
 
   // Handle incoming alert
   const handleIncomingAlert = useCallback((alert: AlertEvent) => {
@@ -262,8 +275,17 @@ export default function App() {
               if (payload.history) setHistory(payload.history);
               if (payload.alerts) setAlerts(payload.alerts);
               if (payload.status) setStatus(payload.status);
-              // Settings are loaded through /api/settings and are not overwritten by
-              // WebSocket init snapshots while an operator may be editing them.
+              // The backend only starts after MongoDB settings are loaded. Use that
+              // snapshot on the first connection to avoid a brief fallback-default alert,
+              // but never overwrite settings after the operator has started editing.
+              if (!settingsLoaded && payload.settings) {
+                setSettings((prev) => ({
+                  ...prev,
+                  ...payload.settings,
+                  thresholds: { ...prev.thresholds, ...payload.settings.thresholds },
+                }));
+                setSettingsLoaded(true);
+              }
             } else if (data.type === 'telemetry:update') {
               handleIncomingTelemetry(data.payload);
             } else if (data.type === 'alert:new') {
@@ -304,6 +326,7 @@ export default function App() {
                   ...cfg,
                   thresholds: { ...prev.thresholds, ...cfg.thresholds },
                 }));
+                setSettingsLoaded(true);
               }
             } else if (data.type === 'mongo:status') {
               setStatus((prev) => ({ ...prev, mongoConnected: data.payload.connected, mongoDatabaseName: data.payload.dbName }));
@@ -379,9 +402,13 @@ export default function App() {
             ...cfg,
             thresholds: { ...prev.thresholds, ...cfg.thresholds },
           }));
+          setSettingsLoaded(true);
         }
       })
-      .catch((err) => console.warn('[Settings] Gagal memuat konfigurasi:', err));
+      .catch((err) => {
+        console.warn('[Settings] Gagal memuat konfigurasi:', err);
+        setSettingsLoaded(true);
+      });
   }, []);
 
   // Push notification permission toggle
@@ -430,6 +457,12 @@ export default function App() {
     }
 
     const savedSettings = data.settings || newSettings;
+    setSettingsLoaded(true);
+    setAcknowledgedAlarmSignature(null);
+    setActiveAlarmSignature(null);
+    setActiveAlarmReason(null);
+    setIsAlarmSounding(false);
+    alarmAudio.stop();
     setSettings((prev) => ({
       ...prev,
       ...savedSettings,
@@ -620,7 +653,7 @@ export default function App() {
 
             {/* Environmental Microclimate & Battery Cards (2 Cols) */}
             <div className="lg:col-span-2">
-              <MetricCards telemetry={latest} />
+              <MetricCards telemetry={latest} thresholds={settings.thresholds} />
             </div>
           </div>
 
@@ -654,6 +687,7 @@ export default function App() {
             history={history}
             onExportCsv={handleExportCsv}
             isExporting={isExporting}
+            thresholds={settings.thresholds}
           />
         </main>
       )}
@@ -689,6 +723,7 @@ export default function App() {
         onClose={() => setIsSimulatorOpen(false)}
         onPublishPacket={handlePublishPacket}
         currentTelemetry={latest}
+        thresholds={settings.thresholds}
       />
     </div>
   );
