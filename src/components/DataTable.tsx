@@ -102,7 +102,7 @@ export const DataTable: React.FC<DataTableProps> = ({
         <table className="w-full text-left text-xs border-collapse">
           <thead className="bg-slate-50/95 dark:bg-slate-800/95 text-slate-600 dark:text-slate-300 uppercase tracking-wider font-semibold sticky top-0 z-10 text-[11px]">
             <tr>
-              <th className="py-3 px-3.5 border-b border-slate-200/80 dark:border-slate-700/80">Waktu</th>
+              <th className="py-3 px-3.5 border-b border-slate-200/80 dark:border-slate-700/80">Waktu Sensor / Diterima</th>
               <th className="py-3 px-3.5 border-b border-slate-200/80 dark:border-slate-700/80">Level Air (m)</th>
               <th className="py-3 px-3.5 border-b border-slate-200/80 dark:border-slate-700/80">Hujan 1J / 24J</th>
               <th className="py-3 px-3.5 border-b border-slate-200/80 dark:border-slate-700/80">Angin (km/jam)</th>
@@ -139,7 +139,20 @@ export const DataTable: React.FC<DataTableProps> = ({
                         {idx === 0 && !sortAsc && (
                           <span className="h-2 w-2 rounded-full bg-indigo-600 animate-ping" title="Paket Terkini" />
                         )}
-                        <span>{row.timestamp}</span>
+                        <div className="flex flex-col leading-tight">
+                          <span>{row.timestamp}</span>
+                          {row.received_at && (
+                            <span className="mt-0.5 text-[10px] text-slate-400 dark:text-slate-500" title="Waktu diterima backend Render">
+                              RX {new Date(row.received_at).toLocaleTimeString('id-ID', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                                fractionalSecondDigits: 3,
+                                hour12: false,
+                              })}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="py-3 px-3.5 font-bold">
