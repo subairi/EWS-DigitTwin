@@ -61,20 +61,23 @@ export const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
   const [activeTab, setActiveTab] = useState<'water' | 'battery' | 'weather' | 'sound' | 'database' | 'mqtt'>('water');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
   const [testTelegramStatus, setTestTelegramStatus] = useState<{ loading: boolean; success?: boolean; message?: string }>({
     loading: false,
   });
 
-  // /api/settings is loaded asynchronously after a browser refresh.
-  // Keep the editable form synchronized with the persisted settings once they arrive.
+  // Sync persisted settings only while the operator has not started editing.
+  // This prevents WebSocket/status refreshes from overwriting values being typed.
   useEffect(() => {
+    if (isDirty) return;
     setFormData({
       ...settings,
       thresholds: { ...DEFAULT_THRESHOLDS, ...settings.thresholds },
     });
-  }, [settings]);
+  }, [settings, isDirty]);
 
   const handleThresholdChange = (key: keyof ThresholdConfig, value: number) => {
+    setIsDirty(true);
     setFormData((prev) => ({
       ...prev,
       thresholds: {
@@ -90,6 +93,7 @@ export const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
     setSaveSuccess(false);
     try {
       await onSaveSettings(formData);
+      setIsDirty(false);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3500);
     } catch {
@@ -101,6 +105,7 @@ export const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
 
   const handleResetDefaults = () => {
     if (window.confirm('Kembalikan semua ambang batas ke nilai standar rekomendasi keselamatan arung jeram?')) {
+      setIsDirty(true);
       setFormData((prev) => ({
         ...prev,
         thresholds: DEFAULT_THRESHOLDS,
@@ -136,7 +141,7 @@ export const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
   const currentWaterPct = Math.min(100, (waterLevel / maxScale) * 100);
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-16">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-16" onChangeCapture={() => setIsDirty(true)}>
       {/* Top Banner Navigation */}
       <div className="bg-white dark:bg-slate-900 border-b border-slate-200/80 dark:border-slate-800 sticky top-0 z-30 shadow-2xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -823,7 +828,7 @@ export const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                   <button
                     key={min}
                     type="button"
-                    onClick={() => setFormData({ ...formData, dbSaveIntervalMin: min })}
+                    onClick={() => { setIsDirty(true); setFormData({ ...formData, dbSaveIntervalMin: min }); }}
                     className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
                       (formData.dbSaveIntervalMin || 5) === min
                         ? 'bg-emerald-600 text-white shadow-2xs'

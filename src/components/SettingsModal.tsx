@@ -41,7 +41,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         thresholds: { ...settings.thresholds },
       });
     }
-  }, [isOpen, settings]);
+    // Intentionally depend only on isOpen: while the modal is open,
+    // background settings/status updates must not overwrite operator input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
