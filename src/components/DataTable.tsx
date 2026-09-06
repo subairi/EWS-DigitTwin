@@ -9,19 +9,21 @@ import {
   BatteryCharging,
   Wifi
 } from 'lucide-react';
-import { RiverTelemetry } from '../types';
+import { RiverTelemetry, ThresholdConfig } from '../types';
 import { formatUptime } from '../utils/safety';
 
 interface DataTableProps {
   history: RiverTelemetry[];
   onExportCsv: () => void;
   isExporting: boolean;
+  thresholds: ThresholdConfig;
 }
 
 export const DataTable: React.FC<DataTableProps> = ({
   history,
   onExportCsv,
   isExporting,
+  thresholds,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortAsc, setSortAsc] = useState(false);
@@ -120,6 +122,11 @@ export const DataTable: React.FC<DataTableProps> = ({
               </tr>
             ) : (
               filteredHistory.map((row, idx) => {
+                const rowBatteryStatus = row.battery_percent <= thresholds.batteryCritPercent
+                  ? 'CRITICAL'
+                  : row.battery_percent <= thresholds.batteryLowPercent
+                  ? 'LOW'
+                  : 'NORMAL';
                 return (
                   <tr 
                     key={row._id || `${row.timestamp}_${idx}`}
@@ -136,7 +143,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                       </div>
                     </td>
                     <td className="py-3 px-3.5 font-bold">
-                      <span className={row.river_level_m >= 3.2 ? 'text-rose-600 dark:text-rose-400' : row.river_level_m >= 2.5 ? 'text-amber-600' : 'text-slate-900 dark:text-slate-100'}>
+                      <span className={row.river_level_m >= thresholds.waterLevelBahaya ? 'text-rose-600 dark:text-rose-400' : row.river_level_m >= thresholds.waterLevelSiaga ? 'text-amber-600' : row.river_level_m >= thresholds.waterLevelWaspada ? 'text-yellow-600' : 'text-slate-900 dark:text-slate-100'}>
                         {row.river_level_m.toFixed(2)} m
                       </span>
                     </td>
@@ -151,7 +158,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                     </td>
                     <td className="py-3 px-3.5 whitespace-nowrap">
                       <div className="flex items-center gap-1.5">
-                        <span className={`font-semibold ${row.battery_percent <= 15 ? 'text-rose-600 font-bold' : 'text-slate-800 dark:text-slate-200'}`}>
+                        <span className={`font-semibold ${row.battery_percent <= thresholds.batteryCritPercent ? 'text-rose-600 font-bold' : row.battery_percent <= thresholds.batteryLowPercent ? 'text-amber-600 font-bold' : 'text-slate-800 dark:text-slate-200'}`}>
                           {row.battery_percent}%
                         </span>
                         <span className="text-[10px] text-slate-400">({row.battery_voltage_v.toFixed(1)}V)</span>
@@ -166,14 +173,14 @@ export const DataTable: React.FC<DataTableProps> = ({
                     <td className="py-3 px-3.5 whitespace-nowrap">
                       <span 
                         className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
-                          row.battery_status === 'CRITICAL'
+                          rowBatteryStatus === 'CRITICAL'
                             ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-900'
-                            : row.battery_status === 'LOW'
+                            : rowBatteryStatus === 'LOW'
                             ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-900'
                             : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-900'
                         }`}
                       >
-                        {row.battery_status}
+                        {rowBatteryStatus}
                       </span>
                     </td>
                   </tr>

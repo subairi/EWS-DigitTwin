@@ -193,21 +193,21 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({
               {/* Safety Threshold Reference Lines */}
               <ReferenceLine
                 y={thresholds.waterLevelBahaya}
-                label={{ value: 'BAHAYA (3.2m)', fill: '#e11d48', fontSize: 10, position: 'right' }}
+                label={{ value: `BAHAYA (${thresholds.waterLevelBahaya}m)`, fill: '#e11d48', fontSize: 10, position: 'right' }}
                 stroke="#e11d48"
                 strokeDasharray="4 4"
                 strokeWidth={2}
               />
               <ReferenceLine
                 y={thresholds.waterLevelSiaga}
-                label={{ value: 'SIAGA (2.5m)', fill: '#d97706', fontSize: 10, position: 'right' }}
+                label={{ value: `SIAGA (${thresholds.waterLevelSiaga}m)`, fill: '#d97706', fontSize: 10, position: 'right' }}
                 stroke="#d97706"
                 strokeDasharray="4 4"
                 strokeWidth={1.5}
               />
               <ReferenceLine
                 y={thresholds.waterLevelWaspada}
-                label={{ value: 'WASPADA (2.0m)', fill: '#ca8a04', fontSize: 10, position: 'right' }}
+                label={{ value: `WASPADA (${thresholds.waterLevelWaspada}m)`, fill: '#ca8a04', fontSize: 10, position: 'right' }}
                 stroke="#ca8a04"
                 strokeDasharray="4 4"
                 strokeWidth={1.5}
@@ -240,6 +240,18 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({
                 }}
               />
               <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '6px' }} />
+              <ReferenceLine
+                y={thresholds.rainExtreme1H}
+                label={{ value: `Ambang 1J (${thresholds.rainExtreme1H}mm)`, fill: '#e11d48', fontSize: 10 }}
+                stroke="#e11d48"
+                strokeDasharray="4 4"
+              />
+              <ReferenceLine
+                y={thresholds.rainExtreme24H}
+                label={{ value: `Ambang 24J (${thresholds.rainExtreme24H}mm)`, fill: '#d97706', fontSize: 10 }}
+                stroke="#d97706"
+                strokeDasharray="4 4"
+              />
               <Bar dataKey="rain_1h" name="Curah Hujan 1 Jam (mm)" fill="#0284c7" radius={[4, 4, 0, 0]} />
               <Bar dataKey="rain_24h" name="Curah Hujan 24 Jam (mm)" fill="#38bdf8" radius={[4, 4, 0, 0]} />
             </BarChart>
@@ -299,6 +311,12 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({
                 y={thresholds.batteryCritPercent}
                 label={{ value: `Kritis (${thresholds.batteryCritPercent}%)`, fill: '#e11d48', fontSize: 10 }}
                 stroke="#e11d48"
+                strokeDasharray="3 3"
+              />
+              <ReferenceLine
+                y={thresholds.batteryLowPercent}
+                label={{ value: `Low (${thresholds.batteryLowPercent}%)`, fill: '#d97706', fontSize: 10 }}
+                stroke="#d97706"
                 strokeDasharray="3 3"
               />
               <Area type="monotone" dataKey="battery_pct" name="Daya Baterai (%)" stroke="#f59e0b" strokeWidth={2} fillOpacity={1} fill="url(#batteryGrad)" />

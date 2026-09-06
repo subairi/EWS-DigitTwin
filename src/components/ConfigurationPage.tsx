@@ -439,7 +439,7 @@ export const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                     min="1.0"
                     max={th.waterLevelSiaga - 0.1}
                     value={th.waterLevelWaspada}
-                    onChange={(e) => handleThresholdChange('waterLevelWaspada', parseFloat(e.target.value) || 2.0)}
+                    onChange={(e) => handleThresholdChange('waterLevelWaspada', Number.isFinite(parseFloat(e.target.value)) ? parseFloat(e.target.value) : th.waterLevelWaspada)}
                     className="w-full px-3 py-2 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold text-sm"
                   />
                   <span className="text-xs font-semibold text-slate-500">m</span>
@@ -471,7 +471,7 @@ export const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                     min={th.waterLevelWaspada + 0.1}
                     max={th.waterLevelBahaya - 0.1}
                     value={th.waterLevelSiaga}
-                    onChange={(e) => handleThresholdChange('waterLevelSiaga', parseFloat(e.target.value) || 2.5)}
+                    onChange={(e) => handleThresholdChange('waterLevelSiaga', Number.isFinite(parseFloat(e.target.value)) ? parseFloat(e.target.value) : th.waterLevelSiaga)}
                     className="w-full px-3 py-2 rounded-lg border border-orange-300 dark:border-orange-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold text-sm"
                   />
                   <span className="text-xs font-semibold text-slate-500">m</span>
@@ -503,7 +503,7 @@ export const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                     min={th.waterLevelSiaga + 0.1}
                     max="6.0"
                     value={th.waterLevelBahaya}
-                    onChange={(e) => handleThresholdChange('waterLevelBahaya', parseFloat(e.target.value) || 3.2)}
+                    onChange={(e) => handleThresholdChange('waterLevelBahaya', Number.isFinite(parseFloat(e.target.value)) ? parseFloat(e.target.value) : th.waterLevelBahaya)}
                     className="w-full px-3 py-2 rounded-lg border border-rose-300 dark:border-rose-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold text-sm"
                   />
                   <span className="text-xs font-semibold text-slate-500">m</span>
@@ -666,7 +666,7 @@ export const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                     min="15"
                     max="50"
                     value={th.batteryLowPercent || 25}
-                    onChange={(e) => handleThresholdChange('batteryLowPercent', parseInt(e.target.value, 10) || 25)}
+                    onChange={(e) => handleThresholdChange('batteryLowPercent', Number.isFinite(parseInt(e.target.value, 10)) ? parseInt(e.target.value, 10) : th.batteryLowPercent)}
                     className="w-32 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold text-sm"
                   />
                   <span className="text-xs text-slate-500">% kapasitas daya</span>
@@ -764,7 +764,7 @@ export const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
                     max="108"
                     step="0.5"
                     value={((th.windExtremeMs || 10) * 3.6).toFixed(1)}
-                    onChange={(e) => handleThresholdChange('windExtremeMs', (parseFloat(e.target.value) || 36) / 3.6)}
+                    onChange={(e) => handleThresholdChange('windExtremeMs', Number.isFinite(parseFloat(e.target.value)) ? parseFloat(e.target.value) / 3.6 : th.windExtremeMs)}
                     className="w-32 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold text-sm"
                   />
                   <span className="text-xs text-slate-500">km/jam</span>

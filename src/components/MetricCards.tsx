@@ -12,16 +12,20 @@ import {
   Zap, 
   AlertTriangle 
 } from 'lucide-react';
-import { RiverTelemetry } from '../types';
+import { RiverTelemetry, ThresholdConfig } from '../types';
 import { formatUptime, getSignalQuality } from '../utils/safety';
 
 interface MetricCardsProps {
   telemetry: RiverTelemetry;
+  thresholds: ThresholdConfig;
 }
 
-export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry }) => {
-  const isBatteryCritical = telemetry.battery_status === 'CRITICAL' || telemetry.battery_percent <= 15;
-  const isBatteryLow = telemetry.battery_percent <= 25 && !isBatteryCritical;
+export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry, thresholds }) => {
+  const isBatteryCritical = telemetry.battery_percent <= thresholds.batteryCritPercent;
+  const isBatteryLow = telemetry.battery_percent <= thresholds.batteryLowPercent && !isBatteryCritical;
+  const batteryStatus = isBatteryCritical ? 'CRITICAL' : isBatteryLow ? 'LOW' : 'NORMAL';
+  const isRainExtreme = telemetry.rain_mm_1H >= thresholds.rainExtreme1H || telemetry.rain_mm_24H >= thresholds.rainExtreme24H;
+  const isWindExtreme = telemetry.wind_ms >= thresholds.windExtremeMs;
   const signal = getSignalQuality(telemetry.wifi_rssi);
 
   return (
@@ -54,9 +58,9 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry }) => {
         </div>
 
         <div className="mt-3 pt-2 text-xs border-t border-slate-100 dark:border-slate-800/80">
-          {telemetry.rain_mm_1H >= 20 ? (
+          {isRainExtreme ? (
             <span className="text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-1.5">
-              <AlertTriangle className="h-3.5 w-3.5" /> Hujan Sangat Lebat (Bahaya)
+              <AlertTriangle className="h-3.5 w-3.5" /> Ambang Hujan Terlampaui
             </span>
           ) : telemetry.rain_mm_1H >= 5 ? (
             <span className="text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1.5">
@@ -100,9 +104,9 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry }) => {
         </div>
 
         <div className="mt-3 pt-2 text-xs border-t border-slate-100 dark:border-slate-800/80">
-          {telemetry.wind_ms >= 10 ? (
+          {isWindExtreme ? (
             <span className="text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-1.5">
-              <AlertTriangle className="h-3.5 w-3.5" /> Waspada Ranting Tumbang
+              <AlertTriangle className="h-3.5 w-3.5" /> Ambang Angin Terlampaui
             </span>
           ) : (
             <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1.5">
@@ -197,7 +201,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry }) => {
                     : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
                 }`}
               >
-                {telemetry.battery_status}
+                {batteryStatus}
               </span>
             </div>
 
@@ -216,7 +220,11 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ telemetry }) => {
         <div className="mt-3 pt-2 text-xs border-t border-slate-100 dark:border-slate-800/80">
           {isBatteryCritical ? (
             <span className="text-rose-700 dark:text-rose-400 font-bold flex items-center gap-1.5">
-              <AlertTriangle className="h-3.5 w-3.5" /> KRITIS! Ganti / charge segera
+              <AlertTriangle className="h-3.5 w-3.5" /> KRITIS ≤ {thresholds.batteryCritPercent}%
+            </span>
+          ) : isBatteryLow ? (
+            <span className="text-amber-700 dark:text-amber-400 font-semibold flex items-center gap-1.5">
+              <AlertTriangle className="h-3.5 w-3.5" /> LOW ≤ {thresholds.batteryLowPercent}%
             </span>
           ) : (
             <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">

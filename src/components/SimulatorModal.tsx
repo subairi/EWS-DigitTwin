@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { X, Send, Radio, Sparkles, AlertTriangle, BatteryWarning, Check } from 'lucide-react';
-import { RiverTelemetry } from '../types';
+import { RiverTelemetry, ThresholdConfig } from '../types';
 
 interface SimulatorModalProps {
   isOpen: boolean;
   onClose: () => void;
   onPublishPacket: (packet: Partial<RiverTelemetry>) => Promise<void>;
   currentTelemetry: RiverTelemetry;
+  thresholds: ThresholdConfig;
 }
 
 export const SimulatorModal: React.FC<SimulatorModalProps> = ({
@@ -14,6 +15,7 @@ export const SimulatorModal: React.FC<SimulatorModalProps> = ({
   onClose,
   onPublishPacket,
   currentTelemetry,
+  thresholds,
 }) => {
   const [formData, setFormData] = useState<Partial<RiverTelemetry>>({
     device: currentTelemetry.device || 'AWS-B49793895DC0',
@@ -76,7 +78,7 @@ export const SimulatorModal: React.FC<SimulatorModalProps> = ({
       case 'waspada':
         setFormData((prev) => ({
           ...prev,
-          river_level_m: 2.25,
+          river_level_m: +(thresholds.waterLevelWaspada + 0.05).toFixed(2),
           rain_mm_1H: 12.5,
           rain_mm_24H: 22.0,
           wind_ms: 7.8,
@@ -90,7 +92,7 @@ export const SimulatorModal: React.FC<SimulatorModalProps> = ({
       case 'siaga':
         setFormData((prev) => ({
           ...prev,
-          river_level_m: 2.85,
+          river_level_m: +(thresholds.waterLevelSiaga + 0.05).toFixed(2),
           rain_mm_1H: 26.0,
           rain_mm_24H: 45.0,
           wind_ms: 11.2,
@@ -104,7 +106,7 @@ export const SimulatorModal: React.FC<SimulatorModalProps> = ({
       case 'bahaya':
         setFormData((prev) => ({
           ...prev,
-          river_level_m: 3.55,
+          river_level_m: +(thresholds.waterLevelBahaya + 0.05).toFixed(2),
           rain_mm_1H: 48.0,
           rain_mm_24H: 95.0,
           wind_ms: 16.5,
@@ -118,8 +120,8 @@ export const SimulatorModal: React.FC<SimulatorModalProps> = ({
       case 'crit_battery':
         setFormData((prev) => ({
           ...prev,
-          river_level_m: 2.78,
-          battery_percent: 10,
+          river_level_m: Math.max(0.5, thresholds.waterLevelWaspada - 0.2),
+          battery_percent: Math.max(5, thresholds.batteryCritPercent - 1),
           battery_voltage_v: 11.75,
           battery_status: 'CRITICAL',
         }));
@@ -255,7 +257,7 @@ export const SimulatorModal: React.FC<SimulatorModalProps> = ({
             <div className="p-3.5 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40">
               <div className="flex justify-between items-center mb-1.5">
                 <span className="font-semibold text-slate-800 dark:text-slate-200">Baterai Sensor:</span>
-                <span className={`font-mono font-bold text-sm ${Number(formData.battery_percent) <= 15 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                <span className={`font-mono font-bold text-sm ${Number(formData.battery_percent) <= thresholds.batteryCritPercent ? 'text-rose-600' : Number(formData.battery_percent) <= thresholds.batteryLowPercent ? 'text-amber-600' : 'text-emerald-600'}`}>
                   {formData.battery_percent}% ({Number(formData.battery_voltage_v).toFixed(2)}V)
                 </span>
               </div>
@@ -272,7 +274,7 @@ export const SimulatorModal: React.FC<SimulatorModalProps> = ({
                     ...formData,
                     battery_percent: pct,
                     battery_voltage_v: volt,
-                    battery_status: pct <= 15 ? 'CRITICAL' : pct <= 25 ? 'LOW' : 'NORMAL',
+                    battery_status: pct <= thresholds.batteryCritPercent ? 'CRITICAL' : pct <= thresholds.batteryLowPercent ? 'LOW' : 'NORMAL',
                   });
                 }}
                 className="w-full accent-amber-500 cursor-pointer"
