@@ -27,6 +27,9 @@ let mongoDb: Db | null = null;
 let isMongoConnected = false;
 let latestDeviceStatus: DeviceStatus | null = null;
 let lastDeviceStatusReceivedAt = 0;
+// Device presence/online state is derived from periodic telemetry (/data), NOT from /status.
+// /status is event-driven and may be silent for long periods.
+let lastPeriodicTelemetryReceivedAt = 0;
 
 // Settings with defaults
 const defaultThresholds: ThresholdConfig = {
@@ -356,29 +359,37 @@ function broadcastToClients(type: string, payload: unknown) {
 }
 
 function getDeviceStatusSnapshot() {
-  const heartbeatIntervalSec = Math.max(1, Number(latestDeviceStatus?.send_interval_sec || 10));
-  const timeoutSec = Math.max(30, heartbeatIntervalSec * 3);
-  const freshnessSec = lastDeviceStatusReceivedAt > 0
-    ? Math.max(0, Math.round((Date.now() - lastDeviceStatusReceivedAt) / 1000))
+  // Presence is determined from the periodic telemetry stream because /status is event-driven.
+  // A device is online while fresh /data packets are still arriving.
+  const dataIntervalSec = Math.max(1, Number(latestTelemetry?.send_interval_sec || 10));
+  const timeoutSec = Math.max(30, dataIntervalSec * 3);
+  const freshnessSec = lastPeriodicTelemetryReceivedAt > 0
+    ? Math.max(0, Math.round((Date.now() - lastPeriodicTelemetryReceivedAt) / 1000))
     : undefined;
 
   const deviceOnline = Boolean(
-    latestDeviceStatus?.message?.toLowerCase() === 'online' &&
+    lastPeriodicTelemetryReceivedAt > 0 &&
     typeof freshnessSec === 'number' &&
     freshnessSec <= timeoutSec
   );
 
   return {
     deviceOnline,
-    deviceId: latestDeviceStatus?.device,
-    deviceLocation: latestDeviceStatus?.location,
-    deviceConnection: latestDeviceStatus?.connection,
-    deviceLastSeen: latestDeviceStatus?.received_at,
+    deviceId: lastPeriodicTelemetryReceivedAt > 0 ? latestTelemetry?.device : latestDeviceStatus?.device,
+    deviceLocation: lastPeriodicTelemetryReceivedAt > 0 ? latestTelemetry?.location : latestDeviceStatus?.location,
+    deviceConnection: lastPeriodicTelemetryReceivedAt > 0 ? latestTelemetry?.connection : latestDeviceStatus?.connection,
+    deviceLastSeen: lastPeriodicTelemetryReceivedAt > 0 ? latestTelemetry?.received_at : undefined,
+    // Keep the existing fields for frontend compatibility; their source is now periodic telemetry.
     deviceStatusFreshnessSec: freshnessSec,
-    deviceHeartbeatIntervalSec: heartbeatIntervalSec,
+    deviceHeartbeatIntervalSec: dataIntervalSec,
     deviceStatusTimeoutSec: timeoutSec,
-    deviceStatusTopic: DEVICE_STATUS_TOPIC,
+    deviceStatusTopic: currentSettings.mqttTopic,
     deviceStatusMessage: deviceOnline ? 'online' : 'offline',
+    devicePresenceSource: 'telemetry',
+    deviceDataIntervalSec: dataIntervalSec,
+    deviceDataTopic: currentSettings.mqttTopic,
+    lastDeviceEventAt: latestDeviceStatus?.received_at,
+    lastDeviceEventMessage: latestDeviceStatus?.message,
   };
 }
 
@@ -406,9 +417,10 @@ function processIncomingDeviceStatus(rawPayload: unknown) {
 
     const snapshot = getDeviceStatusSnapshot();
     console.log(
-      `[MQTT DEVICE] ${latestDeviceStatus.device} | ${latestDeviceStatus.location} | ` +
-      `${snapshot.deviceOnline ? 'ONLINE' : 'OFFLINE'} | ${latestDeviceStatus.connection}`
+      `[MQTT DEVICE EVENT] ${latestDeviceStatus.device} | ${latestDeviceStatus.location} | ` +
+      `${latestDeviceStatus.message.toUpperCase()} | ${latestDeviceStatus.connection}`
     );
+    // /status is informational/event-driven only. Online/offline remains derived from periodic /data.
     broadcastToClients('device:status', snapshot);
   } catch (err) {
     console.error('[MQTT STATUS] Error processing device status:', err);
@@ -741,7 +753,7 @@ async function evaluateAlerts(telemetry: RiverTelemetry) {
 }
 
 // Ingest Incoming Telemetry Packet
-async function processIncomingTelemetry(rawPayload: unknown) {
+async function processIncomingTelemetry(rawPayload: unknown, source: 'mqtt' | 'local' = 'local') {
   try {
     let data: Partial<RiverTelemetry>;
     if (typeof rawPayload === 'string') {
@@ -792,6 +804,11 @@ async function processIncomingTelemetry(rawPayload: unknown) {
     latestTelemetry = telemetryRecord;
     totalPacketsReceived++;
 
+    // Only a real packet arriving through the MQTT telemetry topic is evidence that the IoT device is online.
+    if (source === 'mqtt') {
+      lastPeriodicTelemetryReceivedAt = Date.now();
+    }
+
     telemetryHistory.push(telemetryRecord);
     if (telemetryHistory.length > MAX_HISTORY) {
       telemetryHistory.shift();
@@ -799,6 +816,9 @@ async function processIncomingTelemetry(rawPayload: unknown) {
 
     // 1. Tampilan UI Live & Dinamis: Broadcast langsung ke semua klien setiap ada data masuk dari MQTT
     broadcastToClients('telemetry:update', telemetryRecord);
+    if (source === 'mqtt') {
+      broadcastToClients('device:status', getDeviceStatusSnapshot());
+    }
 
     // Evaluasi EWS Alert langsung untuk deteksi dini bahaya banjir & baterai
     await evaluateAlerts(telemetryRecord);
@@ -977,7 +997,7 @@ function initMqtt(brokerUrl: string, topic: string) {
         }
 
         if (receivedTopic === currentSettings.mqttTopic) {
-          await processIncomingTelemetry(str);
+          await processIncomingTelemetry(str, 'mqtt');
           return;
         }
 
@@ -1222,7 +1242,7 @@ app.post('/api/telemetry/publish', async (req, res) => {
     }
 
     // Fallback saat broker offline: proses lokal satu kali.
-    await processIncomingTelemetry(payload);
+    await processIncomingTelemetry(payload, 'local');
     res.json({ success: true, message: 'MQTT offline; telemetry diproses lokal satu kali.' });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
