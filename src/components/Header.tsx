@@ -175,14 +175,14 @@ export const Header: React.FC<HeaderProps> = ({
               <span>MQTT: {status.mqttConnected ? `EMQX (${status.connectionCheckIntervalSec || 15}s)` : 'Reconnecting'}</span>
             </div>
 
-            {/* Physical IoT device heartbeat */}
+            {/* Physical IoT device presence derived from periodic telemetry */}
             <div
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
                 status.deviceOnline
                   ? 'bg-emerald-50/90 text-emerald-700 border-emerald-200/90 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/80'
                   : 'bg-rose-50/90 text-rose-700 border-rose-200/90 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/80'
               }`}
-              title={`Device: ${status.deviceId || latest.device} | Koneksi: ${status.deviceConnection || '-'} | Last seen: ${status.deviceLastSeen || 'belum ada heartbeat'} | Topic: ${status.deviceStatusTopic || 'digitaltwin/lokasi1/status'}`}
+              title={`Device: ${status.deviceId || latest.device} | Koneksi: ${status.deviceConnection || '-'} | Data terakhir: ${status.deviceLastSeen || 'belum ada telemetry periodik'} | Sumber status: telemetry periodik | Topic: ${status.deviceDataTopic || status.deviceStatusTopic || status.mqttTopic}`}
             >
               <Wifi className={`h-3.5 w-3.5 ${status.deviceOnline ? 'animate-pulse text-emerald-600' : 'text-rose-500'}`} />
               <span>
