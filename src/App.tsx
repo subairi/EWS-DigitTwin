@@ -262,9 +262,8 @@ export default function App() {
               if (payload.history) setHistory(payload.history);
               if (payload.alerts) setAlerts(payload.alerts);
               if (payload.status) setStatus(payload.status);
-              if (payload.settings) {
-                setSettings((prev) => ({ ...prev, ...payload.settings, thresholds: { ...prev.thresholds, ...payload.settings.thresholds } }));
-              }
+              // Settings are loaded through /api/settings and are not overwritten by
+              // WebSocket init snapshots while an operator may be editing them.
             } else if (data.type === 'telemetry:update') {
               handleIncomingTelemetry(data.payload);
             } else if (data.type === 'alert:new') {
@@ -297,6 +296,15 @@ export default function App() {
                 deviceStatusTopic: data.payload.deviceStatusTopic ?? prev.deviceStatusTopic,
                 deviceStatusMessage: data.payload.deviceStatusMessage ?? prev.deviceStatusMessage,
               }));
+            } else if (data.type === 'settings:update') {
+              const cfg = data.payload;
+              if (cfg) {
+                setSettings((prev) => ({
+                  ...prev,
+                  ...cfg,
+                  thresholds: { ...prev.thresholds, ...cfg.thresholds },
+                }));
+              }
             } else if (data.type === 'mongo:status') {
               setStatus((prev) => ({ ...prev, mongoConnected: data.payload.connected, mongoDatabaseName: data.payload.dbName }));
             } else if (data.type === 'db:status' || data.type === 'db:snapshot') {
@@ -349,18 +357,32 @@ export default function App() {
       })
       .catch(() => {});
 
-    fetch('/api/settings')
-      .then((r) => r.json())
-      .then((cfg) => {
-        if (cfg) setSettings((prev) => ({ ...prev, ...cfg, thresholds: { ...prev.thresholds, ...cfg.thresholds } }));
-      })
-      .catch(() => {});
-
     return () => {
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       if (socketRef.current) socketRef.current.close();
     };
   }, [activeTimeRange, handleIncomingTelemetry, handleIncomingAlert]);
+
+  // Load persisted configuration exactly once per browser page load.
+  // Keeping this separate from the WebSocket lifecycle avoids resetting the
+  // configuration form whenever the socket reconnects.
+  useEffect(() => {
+    fetch('/api/settings')
+      .then((r) => {
+        if (!r.ok) throw new Error('Gagal memuat konfigurasi');
+        return r.json();
+      })
+      .then((cfg) => {
+        if (cfg) {
+          setSettings((prev) => ({
+            ...prev,
+            ...cfg,
+            thresholds: { ...prev.thresholds, ...cfg.thresholds },
+          }));
+        }
+      })
+      .catch((err) => console.warn('[Settings] Gagal memuat konfigurasi:', err));
+  }, []);
 
   // Push notification permission toggle
   const handleRequestPush = async () => {
@@ -402,11 +424,17 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newSettings),
     });
+    const data = await res.json();
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Gagal menyimpan pengaturan');
+      throw new Error(data.error || 'Gagal menyimpan pengaturan');
     }
-    setSettings((prev) => ({ ...prev, ...newSettings, thresholds: { ...prev.thresholds, ...newSettings.thresholds } }));
+
+    const savedSettings = data.settings || newSettings;
+    setSettings((prev) => ({
+      ...prev,
+      ...savedSettings,
+      thresholds: { ...prev.thresholds, ...savedSettings.thresholds },
+    }));
     // refresh status
     fetch('/api/status').then((r) => r.json()).then(setStatus).catch(() => {});
   };
