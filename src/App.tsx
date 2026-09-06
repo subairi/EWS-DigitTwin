@@ -76,6 +76,23 @@ const defaultSettings: SystemSettings = {
   thresholds: DEFAULT_THRESHOLDS,
 };
 
+
+const telemetryIdentity = (item: RiverTelemetry) =>
+  `${item.device}|${item.location}|${item.timestamp}|${Number(item.uptime_ms ?? -1)}`;
+
+const dedupeTelemetryHistory = (items: RiverTelemetry[]) => {
+  const seen = new Set<string>();
+  const unique: RiverTelemetry[] = [];
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const item = items[i];
+    const key = telemetryIdentity(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(item);
+  }
+  return unique.reverse();
+};
+
 export default function App() {
   const [currentPage, setCurrentPage] = useState<'dashboard' | 'configuration'>('dashboard');
   const [latest, setLatest] = useState<RiverTelemetry>(initialFallbackTelemetry);
@@ -160,14 +177,10 @@ export default function App() {
 
     // Dynamic real-time UI update: every incoming MQTT packet adds to the live visualization
     setHistory((prev) => {
-      const exists = prev.some((item) => 
-        item.received_at && telemetry.received_at 
-          ? item.received_at === telemetry.received_at 
-          : item.timestamp === telemetry.timestamp && item.uptime_ms === telemetry.uptime_ms && item.river_level_m === telemetry.river_level_m
-      );
+      const incomingKey = telemetryIdentity(telemetry);
+      const exists = prev.some((item) => telemetryIdentity(item) === incomingKey);
       if (exists) return prev;
-      const updated = [...prev, telemetry];
-      return updated.slice(-300);
+      return [...prev, telemetry].slice(-300);
     });
 
     // Do not evaluate alarms with fallback defaults before persisted settings finish loading.
@@ -290,7 +303,7 @@ export default function App() {
             if (data.type === 'init') {
               const payload = data.payload;
               if (payload.latest) setLatest(payload.latest);
-              if (payload.history) setHistory(payload.history);
+              if (payload.history) setHistory(dedupeTelemetryHistory(payload.history));
               if (payload.alerts) setAlerts(payload.alerts);
               if (payload.status) setStatus(payload.status);
               // The backend only starts after MongoDB settings are loaded. Use that
@@ -380,8 +393,9 @@ export default function App() {
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
-          setHistory(data);
-          setLatest(data[data.length - 1]);
+          const unique = dedupeTelemetryHistory(data);
+          setHistory(unique);
+          setLatest(unique[unique.length - 1]);
         }
       })
       .catch(() => {});
@@ -545,7 +559,7 @@ export default function App() {
     fetch(`/api/telemetry/history?timeRange=${range}`)
       .then((r) => r.json())
       .then((data) => {
-        if (Array.isArray(data)) setHistory(data);
+        if (Array.isArray(data)) setHistory(dedupeTelemetryHistory(data));
       })
       .catch(() => {});
   };
