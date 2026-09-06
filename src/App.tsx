@@ -107,6 +107,24 @@ export default function App() {
   const [soundMuted, setSoundMuted] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [activeTimeRange, setActiveTimeRange] = useState('24h');
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window === 'undefined') return 'light';
+    const savedTheme = window.localStorage.getItem('ews-theme');
+    if (savedTheme === 'light' || savedTheme === 'dark') return savedTheme;
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
+
+  // Apply manual theme to the whole application and remember the user's choice.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('dark', theme === 'dark');
+    root.style.colorScheme = theme;
+    window.localStorage.setItem('ews-theme', theme);
+  }, [theme]);
+
+  const handleToggleTheme = useCallback(() => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  }, []);
 
   // Alarm state & ACK management
   const [acknowledgedAlarmSignature, setAcknowledgedAlarmSignature] = useState<string | null>(null);
@@ -538,6 +556,8 @@ export default function App() {
       <Header
         status={status}
         latest={latest}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
         soundMuted={soundMuted}
         onToggleSound={handleToggleSound}
         pushEnabled={pushEnabled}
