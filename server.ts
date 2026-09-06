@@ -1229,27 +1229,55 @@ app.post('/api/telemetry/publish', async (req, res) => {
   }
 });
 
-// 5. CSV Export Endpoint
+// 5. CSV Export Endpoint - rentang 1 hari / 7 hari / 30 hari / semua
 app.get('/api/telemetry/export-csv', async (req, res) => {
   try {
+    type CsvRange = '1d' | '7d' | '30d' | 'all';
+    const requestedRange = String(req.query.range || '7d').toLowerCase();
+    const allowedRanges = new Set<CsvRange>(['1d', '7d', '30d', 'all']);
+    const range: CsvRange = allowedRanges.has(requestedRange as CsvRange)
+      ? requestedRange as CsvRange
+      : '7d';
+
+    const rangeDays: Record<Exclude<CsvRange, 'all'>, number> = {
+      '1d': 1,
+      '7d': 7,
+      '30d': 30,
+    };
+
+    const now = Date.now();
+    const since = range === 'all'
+      ? null
+      : new Date(now - rangeDays[range] * 24 * 60 * 60 * 1000);
+
+    const getTelemetryTimeMs = (t: RiverTelemetry): number => {
+      const raw = t.received_at || t.timestamp;
+      if (!raw) return 0;
+      const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+      const parsed = Date.parse(normalized);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
     let records: RiverTelemetry[] = [];
     if (isMongoConnected && mongoDb) {
       try {
+        const query = since ? { createdAt: { $gte: since } } : {};
         const mongoRecords = await mongoDb.collection('telemetry_records')
-          .find({})
-          .sort({ createdAt: -1 })
-          .limit(2000)
+          .find(query)
+          .sort({ createdAt: 1 })
           .toArray();
-        records = (mongoRecords as unknown as RiverTelemetry[]).reverse();
-      } catch {
-        records = telemetryHistory;
+        records = mongoRecords as unknown as RiverTelemetry[];
+      } catch (mongoErr) {
+        console.warn('[CSV] Gagal membaca MongoDB, memakai history RAM:', mongoErr);
+        records = telemetryHistory.filter((t) => !since || getTelemetryTimeMs(t) >= since.getTime());
       }
     } else {
-      records = telemetryHistory;
+      records = telemetryHistory.filter((t) => !since || getTelemetryTimeMs(t) >= since.getTime());
     }
 
     const headers = [
       'Timestamp',
+      'Received_At',
       'Device_ID',
       'Location',
       'River_Level_m',
@@ -1269,10 +1297,12 @@ app.get('/api/telemetry/export-csv', async (req, res) => {
       'FW_Version',
     ];
 
+    const csvEscape = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
     const rows = records.map((t) => [
-      `"${t.timestamp}"`,
-      `"${t.device}"`,
-      `"${t.location}"`,
+      csvEscape(t.timestamp),
+      csvEscape(t.received_at || ''),
+      csvEscape(t.device),
+      csvEscape(t.location),
       t.river_level_m,
       t.rain_mm_1H,
       t.rain_mm_24H,
@@ -1282,18 +1312,28 @@ app.get('/api/telemetry/export-csv', async (req, res) => {
       t.humidity_percent,
       t.battery_voltage_v,
       t.battery_percent,
-      `"${t.battery_status}"`,
+      csvEscape(t.battery_status),
       t.wifi_rssi,
       t.gsm_signal,
       t.uptime_ms,
-      `"${t.connection}"`,
-      `"${t.fw_version}"`,
+      csvEscape(t.connection),
+      csvEscape(t.fw_version),
     ].join(','));
 
-    const csvContent = [headers.join(','), ...rows].join('\n');
+    // BOM UTF-8 membantu Excel mengenali encoding dengan benar.
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\n');
+    const rangeLabel: Record<CsvRange, string> = {
+      '1d': '1hari',
+      '7d': '7hari',
+      '30d': '30hari',
+      all: 'semua',
+    };
+    const dateStamp = new Date().toISOString().substring(0, 10);
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="river_telemetry_${new Date().toISOString().substring(0, 10)}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="river_telemetry_${rangeLabel[range]}_${dateStamp}.csv"`);
+    res.setHeader('X-Export-Range', range);
+    res.setHeader('X-Record-Count', String(records.length));
     res.send(csvContent);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
