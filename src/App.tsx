@@ -104,7 +104,9 @@ export default function App() {
     mqttBroker: 'mqtt://broker.emqx.io:1883',
     mqttTopic: 'digitaltwin/lokasi1/data',
     deviceOnline: false,
-    deviceStatusTopic: 'digitaltwin/lokasi1/status',
+    deviceStatusTopic: 'digitaltwin/lokasi1/data',
+    devicePresenceSource: 'telemetry',
+    deviceDataTopic: 'digitaltwin/lokasi1/data',
     connectionCheckIntervalSec: 15,
     lastConnectionCheckTime: new Date().toISOString(),
     connectionHealth: 'optimal',
@@ -349,6 +351,11 @@ export default function App() {
                 deviceStatusTimeoutSec: data.payload.deviceStatusTimeoutSec ?? prev.deviceStatusTimeoutSec,
                 deviceStatusTopic: data.payload.deviceStatusTopic ?? prev.deviceStatusTopic,
                 deviceStatusMessage: data.payload.deviceStatusMessage ?? prev.deviceStatusMessage,
+                devicePresenceSource: data.payload.devicePresenceSource ?? prev.devicePresenceSource,
+                deviceDataIntervalSec: data.payload.deviceDataIntervalSec ?? prev.deviceDataIntervalSec,
+                deviceDataTopic: data.payload.deviceDataTopic ?? prev.deviceDataTopic,
+                lastDeviceEventAt: data.payload.lastDeviceEventAt ?? prev.lastDeviceEventAt,
+                lastDeviceEventMessage: data.payload.lastDeviceEventMessage ?? prev.lastDeviceEventMessage,
               }));
             } else if (data.type === 'settings:update') {
               const cfg = data.payload;

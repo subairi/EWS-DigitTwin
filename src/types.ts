@@ -99,6 +99,11 @@ export interface SystemStatus {
   deviceStatusTimeoutSec?: number;
   deviceStatusTopic?: string;
   deviceStatusMessage?: string;
+  devicePresenceSource?: 'telemetry' | 'status';
+  deviceDataIntervalSec?: number;
+  deviceDataTopic?: string;
+  lastDeviceEventAt?: string;
+  lastDeviceEventMessage?: string;
   connectionCheckIntervalSec: number;
   lastConnectionCheckTime?: string;
   connectionHealth?: 'optimal' | 'idle' | 'warning' | 'disconnected';
