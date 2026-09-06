@@ -12,6 +12,8 @@ dotenv.config();
 
 const PORT = Number(process.env.PORT) || 10000;
 const DEVICE_STATUS_TOPIC = (process.env.MQTT_STATUS_TOPIC || 'digitaltwin/lokasi1/status').trim();
+const SETTINGS_COLLECTION = 'system_settings';
+const SETTINGS_DOCUMENT_ID = 'global';
 const app = express();
 app.use(express.json());
 
@@ -83,6 +85,105 @@ let currentSettings: SystemSettings = {
   mongoUri: process.env.MONGODB_URI || '',
   thresholds: { ...defaultThresholds },
 };
+
+// Persist operational settings in MongoDB so browser refreshes / Render restarts
+// do not reset thresholds to the hard-coded defaults. Secrets remain sourced from
+// environment variables and are intentionally not written into system_settings.
+function getPersistableSettings() {
+  return {
+    mqttBrokerUrl: currentSettings.mqttBrokerUrl,
+    mqttTopic: currentSettings.mqttTopic,
+    connectionCheckIntervalSec: currentSettings.connectionCheckIntervalSec,
+    dbSaveIntervalMin: currentSettings.dbSaveIntervalMin,
+    telegramChatId: currentSettings.telegramChatId,
+    telegramEnabled: currentSettings.telegramEnabled,
+    soundAlertEnabled: currentSettings.soundAlertEnabled,
+    pushAlertEnabled: currentSettings.pushAlertEnabled,
+    thresholds: { ...currentSettings.thresholds },
+    updatedAt: new Date(),
+  };
+}
+
+async function persistSettingsToMongo(): Promise<boolean> {
+  if (!mongoDb || !isMongoConnected) {
+    console.warn('[Settings] MongoDB belum terhubung; konfigurasi hanya tersimpan sementara di RAM.');
+    return false;
+  }
+
+  try {
+    await mongoDb.collection(SETTINGS_COLLECTION).updateOne(
+      { _id: SETTINGS_DOCUMENT_ID as any },
+      {
+        $set: getPersistableSettings(),
+        $setOnInsert: { createdAt: new Date() },
+      },
+      { upsert: true },
+    );
+    console.log('[Settings] Konfigurasi tersimpan permanen di MongoDB.');
+    return true;
+  } catch (err) {
+    console.error('[Settings] Gagal menyimpan konfigurasi ke MongoDB:', (err as Error).message);
+    return false;
+  }
+}
+
+async function loadSettingsFromMongo(): Promise<boolean> {
+  if (!mongoDb || !isMongoConnected) return false;
+
+  try {
+    const saved = await mongoDb.collection(SETTINGS_COLLECTION).findOne({
+      _id: SETTINGS_DOCUMENT_ID as any,
+    });
+
+    if (!saved) {
+      // First run: create one persistent document from current defaults/env settings.
+      await persistSettingsToMongo();
+      return false;
+    }
+
+    const prevBroker = currentSettings.mqttBrokerUrl;
+    const prevTopic = currentSettings.mqttTopic;
+    const prevInterval = currentSettings.connectionCheckIntervalSec;
+
+    if (typeof saved.mqttBrokerUrl === 'string' && saved.mqttBrokerUrl) {
+      currentSettings.mqttBrokerUrl = normalizeMqttUrl(saved.mqttBrokerUrl);
+    }
+    if (typeof saved.mqttTopic === 'string' && saved.mqttTopic.trim()) {
+      currentSettings.mqttTopic = saved.mqttTopic.trim();
+    }
+    if (typeof saved.connectionCheckIntervalSec === 'number') {
+      currentSettings.connectionCheckIntervalSec = Math.max(10, Math.min(30, saved.connectionCheckIntervalSec));
+    }
+    if (typeof saved.dbSaveIntervalMin === 'number') {
+      currentSettings.dbSaveIntervalMin = Math.max(1, Math.min(60, saved.dbSaveIntervalMin));
+    }
+    if (typeof saved.telegramChatId === 'string') currentSettings.telegramChatId = saved.telegramChatId;
+    if (typeof saved.telegramEnabled === 'boolean') currentSettings.telegramEnabled = saved.telegramEnabled;
+    if (typeof saved.soundAlertEnabled === 'boolean') currentSettings.soundAlertEnabled = saved.soundAlertEnabled;
+    if (typeof saved.pushAlertEnabled === 'boolean') currentSettings.pushAlertEnabled = saved.pushAlertEnabled;
+    if (saved.thresholds && typeof saved.thresholds === 'object') {
+      currentSettings.thresholds = {
+        ...defaultThresholds,
+        ...currentSettings.thresholds,
+        ...saved.thresholds,
+      };
+    }
+
+    console.log('[Settings] Konfigurasi berhasil dimuat dari MongoDB.');
+
+    if (currentSettings.connectionCheckIntervalSec !== prevInterval) {
+      startConnectionCheckTimer(currentSettings.connectionCheckIntervalSec);
+    }
+    if (currentSettings.mqttBrokerUrl !== prevBroker || currentSettings.mqttTopic !== prevTopic) {
+      initMqtt(currentSettings.mqttBrokerUrl, currentSettings.mqttTopic);
+    }
+
+    return true;
+  } catch (err) {
+    console.error('[Settings] Gagal memuat konfigurasi dari MongoDB:', (err as Error).message);
+    return false;
+  }
+}
 
 // Database storage rate limiter: Snapshot every 5 minutes only
 let lastDbSaveTimestamp = 0;
@@ -886,6 +987,9 @@ async function initMongo(mongoUri: string) {
     isMongoConnected = true;
     console.log('MongoDB Atlas connected successfully to river_flood_monitoring');
 
+    // Load persistent application settings before continuing normal operation.
+    await loadSettingsFromMongo();
+
     // Sync in-memory history to MongoDB collection if collection is empty
     const count = await mongoDb.collection('telemetry_records').countDocuments();
     if (count === 0 && telemetryHistory.length > 0) {
@@ -1243,7 +1347,14 @@ app.post('/api/settings', async (req, res) => {
       initMqtt(currentSettings.mqttBrokerUrl, currentSettings.mqttTopic);
     }
 
-    res.json({ success: true, message: 'Pengaturan berhasil diperbarui' });
+    const persisted = await persistSettingsToMongo();
+    res.json({
+      success: true,
+      persisted,
+      message: persisted
+        ? 'Pengaturan berhasil disimpan permanen ke MongoDB'
+        : 'Pengaturan diperbarui, tetapi belum tersimpan permanen karena MongoDB tidak terhubung',
+    });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
