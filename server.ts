@@ -229,6 +229,48 @@ let alertHistory: AlertEvent[] = [];
 let totalPacketsReceived = 0;
 const appStartTime = Date.now();
 
+// Deduplikasi paket berdasarkan identitas sampel sensor, bukan received_at.
+// received_at dibuat oleh server sehingga akan selalu berbeda pada pengiriman duplikat.
+const recentTelemetryKeys = new Map<string, number>();
+const TELEMETRY_DEDUPE_WINDOW_MS = 2 * 60 * 1000;
+
+function telemetrySampleKey(data: Partial<RiverTelemetry>): string {
+  return [
+    data.device || 'unknown-device',
+    data.location || 'unknown-location',
+    data.timestamp || 'no-timestamp',
+    Number(data.uptime_ms ?? -1),
+  ].join('|');
+}
+
+function isDuplicateTelemetrySample(data: Partial<RiverTelemetry>): boolean {
+  const key = telemetrySampleKey(data);
+  const now = Date.now();
+  const previous = recentTelemetryKeys.get(key);
+
+  if (recentTelemetryKeys.size > 2000) {
+    for (const [savedKey, savedAt] of recentTelemetryKeys) {
+      if (now - savedAt > TELEMETRY_DEDUPE_WINDOW_MS) recentTelemetryKeys.delete(savedKey);
+    }
+  }
+
+  if (previous && now - previous <= TELEMETRY_DEDUPE_WINDOW_MS) return true;
+  recentTelemetryKeys.set(key, now);
+  return false;
+}
+
+function dedupeTelemetryRecords<T extends Partial<RiverTelemetry>>(records: T[]): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const record of records) {
+    const key = telemetrySampleKey(record);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(record);
+  }
+  return result;
+}
+
 // State tracker for Telegram alerts: ONLY dispatch when status changes.
 // If status has already been sent and the state/data does not change, DO NOT send duplicate messages to Telegram.
 interface TelegramStateTracking {
@@ -742,6 +784,11 @@ async function processIncomingTelemetry(rawPayload: unknown) {
       received_at: new Date().toISOString(),
     };
 
+    if (isDuplicateTelemetrySample(telemetryRecord)) {
+      console.log(`[MQTT DEDUPE] Paket telemetry duplikat diabaikan: ${telemetrySampleKey(telemetryRecord)}`);
+      return;
+    }
+
     latestTelemetry = telemetryRecord;
     totalPacketsReceived++;
 
@@ -896,23 +943,23 @@ function initMqtt(brokerUrl: string, topic: string) {
         connectionHealth: 'optimal',
       });
 
-      // Primary topic subscription (default: digitaltwin/lokasi1/data)
+      // Subscribe hanya ke topic yang memang dipakai aplikasi.
+      // Hindari wildcard tumpang tindih karena satu publikasi MQTT dapat cocok ke beberapa filter.
       activeMqttClient?.subscribe(cleanTopic, { qos: 0 }, (err) => {
         if (err) {
-          console.error('MQTT Subscription error:', err);
+          console.error('MQTT Telemetry subscription error:', err);
         } else {
-          console.log(`MQTT Subscribed successfully to: ${cleanTopic}`);
+          console.log(`MQTT Telemetry subscribed: ${cleanTopic}`);
         }
       });
 
-      // Also subscribe to digitaltwin wildcard topics so all devices/nested data are captured
-      if (cleanTopic !== 'digitaltwin/lokasi1/#' && cleanTopic !== 'digitaltwin/#') {
-        activeMqttClient?.subscribe('digitaltwin/lokasi1/#', { qos: 0 });
-        activeMqttClient?.subscribe('digitaltwin/#', { qos: 0 });
-      }
-
-      // Backward compatibility for river/telemetry/#
-      activeMqttClient?.subscribe('river/telemetry/#', { qos: 0 });
+      activeMqttClient?.subscribe(DEVICE_STATUS_TOPIC, { qos: 0 }, (err) => {
+        if (err) {
+          console.error('MQTT Device status subscription error:', err);
+        } else {
+          console.log(`MQTT Device status subscribed: ${DEVICE_STATUS_TOPIC}`);
+        }
+      });
 
       // Start / refresh the periodic connection check timer
       startConnectionCheckTimer(currentSettings.connectionCheckIntervalSec);
@@ -923,18 +970,13 @@ function initMqtt(brokerUrl: string, topic: string) {
         const str = payload.toString();
         console.log(`[MQTT RX] ${receivedTopic}`);
 
-        // Device heartbeat/status packets are not sensor telemetry.
-        if (receivedTopic === DEVICE_STATUS_TOPIC || receivedTopic.endsWith('/status')) {
+        // Routing ketat: hanya topic yang dikonfigurasi yang boleh diproses.
+        if (receivedTopic === DEVICE_STATUS_TOPIC) {
           processIncomingDeviceStatus(str);
           return;
         }
 
-        // Sensor telemetry packets.
-        if (
-          receivedTopic === currentSettings.mqttTopic ||
-          receivedTopic.endsWith('/data') ||
-          receivedTopic.startsWith('river/telemetry/')
-        ) {
+        if (receivedTopic === currentSettings.mqttTopic) {
           await processIncomingTelemetry(str);
           return;
         }
@@ -1140,7 +1182,8 @@ app.get('/api/telemetry/history', async (req, res) => {
         .toArray();
 
       if (records.length > 0) {
-        return res.json(records.reverse());
+        const uniqueRecords = dedupeTelemetryRecords(records);
+        return res.json(uniqueRecords.reverse());
       }
     } catch (err) {
       console.warn('MongoDB query fallback to memory:', err);
@@ -1160,7 +1203,7 @@ app.get('/api/telemetry/history', async (req, res) => {
     filtered = filtered.filter((t) => (now - new Date(t.received_at || t.timestamp).getTime()) <= 7 * 24 * 60 * 60 * 1000);
   }
 
-  res.json(filtered.slice(-limit));
+  res.json(dedupeTelemetryRecords(filtered).slice(-limit));
 });
 
 // 4. Publish / Simulate Telemetry Packet
@@ -1171,16 +1214,16 @@ app.post('/api/telemetry/publish', async (req, res) => {
       return res.status(400).json({ error: 'Field river_level_m required' });
     }
 
-    // Publish to MQTT broker if connected
+    // Jika MQTT terhubung, publish satu kali dan biarkan subscriber menjadi jalur ingestion tunggal.
     if (activeMqttClient && activeMqttClient.connected) {
       const topic = currentSettings.mqttTopic;
       activeMqttClient.publish(topic, JSON.stringify(payload), { qos: 0 });
+      return res.json({ success: true, message: 'Telemetry dipublikasikan ke MQTT dan diproses satu kali melalui subscriber.' });
     }
 
-    // Also process locally
+    // Fallback saat broker offline: proses lokal satu kali.
     await processIncomingTelemetry(payload);
-
-    res.json({ success: true, message: 'Telemetry packet ingested and published to MQTT broker' });
+    res.json({ success: true, message: 'MQTT offline; telemetry diproses lokal satu kali.' });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
