@@ -17,3 +17,16 @@ body {
   -moz-osx-font-smoothing: grayscale;
   transition: background-color 180ms ease, color 180ms ease;
 }
+
+
+/* Keep live telemetry digits visually stable while values animate. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+  }
+}
