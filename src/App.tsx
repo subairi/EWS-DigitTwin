@@ -153,6 +153,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [csvRange, setCsvRange] = useState<'1d' | '7d' | '30d' | 'all'>('7d');
   const [isSendingTelegram, setIsSendingTelegram] = useState(false);
 
   const socketRef = useRef<WebSocket | null>(null);
@@ -464,12 +465,18 @@ export default function App() {
     alarmAudio.setMuted(newMuted);
   };
 
-  // CSV Export handler
-  const handleExportCsv = () => {
+  // CSV Export handler - default 7 hari, dapat dipilih 1/7/30 hari atau semua data
+  const handleExportCsv = (range: '1d' | '7d' | '30d' | 'all' = csvRange) => {
     setIsExporting(true);
+    const rangeLabel = {
+      '1d': '1hari',
+      '7d': '7hari',
+      '30d': '30hari',
+      all: 'semua',
+    }[range];
     const link = document.createElement('a');
-    link.href = '/api/telemetry/export-csv';
-    link.setAttribute('download', `river_telemetry_${new Date().toISOString().substring(0, 10)}.csv`);
+    link.href = `/api/telemetry/export-csv?range=${range}`;
+    link.setAttribute('download', `river_telemetry_${rangeLabel}_${new Date().toISOString().substring(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -578,8 +585,9 @@ export default function App() {
         onRequestPush={handleRequestPush}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenSimulator={() => setIsSimulatorOpen(true)}
-        onExportCsv={handleExportCsv}
+        onExportCsv={() => handleExportCsv(csvRange)}
         isExporting={isExporting}
+        csvRange={csvRange}
         currentPage={currentPage}
         onNavigate={(page) => setCurrentPage(page)}
         isAlarmSounding={isAlarmSounding}
@@ -719,9 +727,11 @@ export default function App() {
           {/* 4. Full Historical Data Table with CSV Export */}
           <DataTable
             history={history}
-            onExportCsv={handleExportCsv}
+            onExportCsv={() => handleExportCsv(csvRange)}
             isExporting={isExporting}
             thresholds={settings.thresholds}
+            csvRange={csvRange}
+            onCsvRangeChange={setCsvRange}
           />
         </main>
       )}
