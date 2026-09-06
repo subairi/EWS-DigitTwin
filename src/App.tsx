@@ -263,7 +263,7 @@ export default function App() {
               if (payload.alerts) setAlerts(payload.alerts);
               if (payload.status) setStatus(payload.status);
               if (payload.settings) {
-                setSettings((prev) => ({ ...prev, ...payload.settings }));
+                setSettings((prev) => ({ ...prev, ...payload.settings, thresholds: { ...prev.thresholds, ...payload.settings.thresholds } }));
               }
             } else if (data.type === 'telemetry:update') {
               handleIncomingTelemetry(data.payload);
@@ -352,7 +352,7 @@ export default function App() {
     fetch('/api/settings')
       .then((r) => r.json())
       .then((cfg) => {
-        if (cfg) setSettings((prev) => ({ ...prev, ...cfg }));
+        if (cfg) setSettings((prev) => ({ ...prev, ...cfg, thresholds: { ...prev.thresholds, ...cfg.thresholds } }));
       })
       .catch(() => {});
 
@@ -406,7 +406,7 @@ export default function App() {
       const err = await res.json();
       throw new Error(err.error || 'Gagal menyimpan pengaturan');
     }
-    setSettings((prev) => ({ ...prev, ...newSettings }));
+    setSettings((prev) => ({ ...prev, ...newSettings, thresholds: { ...prev.thresholds, ...newSettings.thresholds } }));
     // refresh status
     fetch('/api/status').then((r) => r.json()).then(setStatus).catch(() => {});
   };
