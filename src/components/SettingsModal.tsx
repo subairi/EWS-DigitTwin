@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   X, 
   Send, 
@@ -33,6 +33,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [testStatus, setTestStatus] = useState<{ loading: boolean; success?: boolean; message?: string }>({ loading: false });
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setFormData({
+        ...settings,
+        thresholds: { ...settings.thresholds },
+      });
+    }
+  }, [isOpen, settings]);
 
   if (!isOpen) return null;
 

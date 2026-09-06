@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Waves, 
   ShieldAlert, 
@@ -64,6 +64,15 @@ export const ConfigurationPage: React.FC<ConfigurationPageProps> = ({
   const [testTelegramStatus, setTestTelegramStatus] = useState<{ loading: boolean; success?: boolean; message?: string }>({
     loading: false,
   });
+
+  // /api/settings is loaded asynchronously after a browser refresh.
+  // Keep the editable form synchronized with the persisted settings once they arrive.
+  useEffect(() => {
+    setFormData({
+      ...settings,
+      thresholds: { ...DEFAULT_THRESHOLDS, ...settings.thresholds },
+    });
+  }, [settings]);
 
   const handleThresholdChange = (key: keyof ThresholdConfig, value: number) => {
     setFormData((prev) => ({
