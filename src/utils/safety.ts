@@ -17,10 +17,16 @@ export function assessRaftingSafety(
 ): RaftingAssessment {
   const level = telemetry.river_level_m;
   const rain1H = telemetry.rain_mm_1H;
+  const rain24H = telemetry.rain_mm_24H;
   const wind = telemetry.wind_ms;
 
-  // BAHAYA: Extreme conditions
-  if (level >= thresholds.waterLevelBahaya || rain1H >= 35 || wind >= 16) {
+  const rainExtreme = rain1H >= thresholds.rainExtreme1H || rain24H >= thresholds.rainExtreme24H;
+  const windExtreme = wind >= thresholds.windExtremeMs;
+
+  // BAHAYA uses the configured water danger threshold. Rain/wind only have one
+  // configurable extreme threshold, so they elevate the operational status to SIAGA
+  // rather than relying on hidden hard-coded "critical" values.
+  if (level >= thresholds.waterLevelBahaya) {
     return {
       status: 'BAHAYA',
       gradeText: 'Level V+ (Extreme Flood Danger)',
@@ -29,26 +35,30 @@ export function assessRaftingSafety(
       bgLight: 'bg-rose-50/90 dark:bg-rose-950/40',
       borderLight: 'border-rose-300 dark:border-rose-800',
       isRaftingAllowed: false,
-      hazardNote: `Ketinggian air ${level.toFixed(2)}m (Ambang Bahaya: ${thresholds.waterLevelBahaya}m) | Curah Hujan 1J: ${rain1H}mm`,
+      hazardNote: `Ketinggian air ${level.toFixed(2)}m (Ambang Bahaya: ${thresholds.waterLevelBahaya}m).`,
     };
   }
 
-  // SIAGA: High risk water
-  if (level >= thresholds.waterLevelSiaga || rain1H >= thresholds.rainExtreme1H || wind >= thresholds.windExtremeMs) {
+  // SIAGA follows only values that can be configured from the dashboard.
+  if (level >= thresholds.waterLevelSiaga || rainExtreme || windExtreme) {
+    const causes: string[] = [];
+    if (level >= thresholds.waterLevelSiaga) causes.push(`air ${level.toFixed(2)}m ≥ ${thresholds.waterLevelSiaga}m`);
+    if (rain1H >= thresholds.rainExtreme1H) causes.push(`hujan 1 jam ${rain1H}mm ≥ ${thresholds.rainExtreme1H}mm`);
+    if (rain24H >= thresholds.rainExtreme24H) causes.push(`hujan 24 jam ${rain24H}mm ≥ ${thresholds.rainExtreme24H}mm`);
+    if (windExtreme) causes.push(`angin ${(wind * 3.6).toFixed(1)} km/jam ≥ ${(thresholds.windExtremeMs * 3.6).toFixed(1)} km/jam`);
     return {
       status: 'SIAGA',
-      gradeText: 'Level IV (High Turbulent Water)',
-      recommendation: 'Tunda peluncuran trip arung jeram. Debit air deras dengan hidraulik kuat. Khusus skipper & rescue tersertifikasi jika diperlukan patroli darurat.',
+      gradeText: 'Level IV (High Risk / Extreme Weather)',
+      recommendation: 'Tunda peluncuran trip arung jeram dan lakukan pemantauan ketat sampai parameter kembali di bawah ambang yang dikonfigurasi.',
       color: 'text-amber-600 dark:text-amber-400',
       bgLight: 'bg-amber-50/90 dark:bg-amber-950/40',
       borderLight: 'border-amber-300 dark:border-amber-800',
       isRaftingAllowed: false,
-      hazardNote: `Debit air hulu tinggi (${level.toFixed(2)}m). Resiko pembalikan perahu tinggi.`,
+      hazardNote: causes.length ? `Pemicu: ${causes.join(' | ')}` : undefined,
     };
   }
 
-  // WASPADA: Moderate water rise
-  if (level >= thresholds.waterLevelWaspada || rain1H >= 10 || wind >= 8) {
+  if (level >= thresholds.waterLevelWaspada) {
     return {
       status: 'WASPADA',
       gradeText: 'Level III (Moderate Rapids / Rapid Rise)',
@@ -57,11 +67,10 @@ export function assessRaftingSafety(
       bgLight: 'bg-amber-50/60 dark:bg-amber-950/30',
       borderLight: 'border-amber-200 dark:border-amber-800/80',
       isRaftingAllowed: true,
-      hazardNote: `Ketinggian air ${level.toFixed(2)}m berada dalam batas waspada. Arus mulai deras.`,
+      hazardNote: `Ketinggian air ${level.toFixed(2)}m telah melewati ambang waspada ${thresholds.waterLevelWaspada}m.`,
     };
   }
 
-  // AMAN: Calm to ideal rapids
   return {
     status: 'AMAN',
     gradeText: 'Level I - II (Ideal & Safe Recreational Water)',
