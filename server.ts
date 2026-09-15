@@ -14,6 +14,10 @@ const PORT = Number(process.env.PORT) || 10000;
 const DEVICE_STATUS_TOPIC = (process.env.MQTT_STATUS_TOPIC || 'digitaltwin/lokasi1/status').trim();
 const SETTINGS_COLLECTION = 'system_settings';
 const SETTINGS_DOCUMENT_ID = 'global';
+const MQTT_WATCHDOG_MIN_TIMEOUT_SEC = Math.max(60, Number(process.env.MQTT_WATCHDOG_TIMEOUT_SEC) || 60);
+const MQTT_WATCHDOG_RECOVERY_COOLDOWN_MS = Math.max(60_000, Number(process.env.MQTT_WATCHDOG_RECOVERY_COOLDOWN_MS) || 5 * 60_000);
+const WS_HEARTBEAT_INTERVAL_MS = 30_000;
+const WS_MAX_BUFFERED_BYTES = 1_000_000;
 const app = express();
 app.use(express.json());
 
@@ -30,6 +34,13 @@ let lastDeviceStatusReceivedAt = 0;
 // Device presence/online state is derived from periodic telemetry (/data), NOT from /status.
 // /status is event-driven and may be silent for long periods.
 let lastPeriodicTelemetryReceivedAt = 0;
+let lastMqttConnectTime: string | undefined;
+let mqttReconnectCount = 0;
+let mqttWatchdogReconnectCount = 0;
+let mqttLastReconnectReason: string | undefined;
+let lastMqttRecoveryAttemptAt = 0;
+let mqttRecoveryInProgress = false;
+let wsStaleClientsTerminated = 0;
 
 // Settings with defaults
 const defaultThresholds: ThresholdConfig = {
@@ -349,13 +360,99 @@ function generateInitialHistory() {
 telemetryHistory = generateInitialHistory();
 
 // WebSocket Broadcast Helper
+// Protect the Node process from slow/stale browsers accumulating buffered messages.
 function broadcastToClients(type: string, payload: unknown) {
   const message = JSON.stringify({ type, payload });
   wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
+    if (client.readyState !== WebSocket.OPEN) return;
+
+    if (client.bufferedAmount > WS_MAX_BUFFERED_BYTES) {
+      console.warn(`[WS] Client lambat/stale ditutup (buffer=${client.bufferedAmount} bytes)`);
+      wsStaleClientsTerminated++;
+      try { client.terminate(); } catch { /* ignore */ }
+      return;
+    }
+
+    try {
       client.send(message);
+    } catch (err) {
+      console.warn('[WS] Gagal broadcast ke client:', (err as Error).message);
+      try { client.terminate(); } catch { /* ignore */ }
     }
   });
+}
+
+function getMqttWatchdogTimeoutSec(): number {
+  const dataIntervalSec = Math.max(1, Number(latestTelemetry?.send_interval_sec || 10));
+  // At least 60 seconds, or 6 expected packets. This avoids aggressive reconnects
+  // while still recovering automatically from a zombie/stale MQTT subscription.
+  return Math.max(MQTT_WATCHDOG_MIN_TIMEOUT_SEC, dataIntervalSec * 6);
+}
+
+function getTelemetryAgeSec(): number | undefined {
+  if (lastPeriodicTelemetryReceivedAt <= 0) return undefined;
+  return Math.max(0, Math.floor((Date.now() - lastPeriodicTelemetryReceivedAt) / 1000));
+}
+
+function getMqttFlowSnapshot() {
+  const mqttConnected = Boolean(activeMqttClient?.connected);
+  const watchdogTimeoutSec = getMqttWatchdogTimeoutSec();
+  const lastTelemetryAgeSec = getTelemetryAgeSec();
+  const uptimeSec = Math.floor((Date.now() - appStartTime) / 1000);
+
+  let mqttDataFlow: 'awaiting' | 'healthy' | 'stale' | 'disconnected';
+  if (!mqttConnected) {
+    mqttDataFlow = 'disconnected';
+  } else if (typeof lastTelemetryAgeSec === 'number') {
+    mqttDataFlow = lastTelemetryAgeSec <= watchdogTimeoutSec ? 'healthy' : 'stale';
+  } else {
+    mqttDataFlow = uptimeSec <= watchdogTimeoutSec ? 'awaiting' : 'stale';
+  }
+
+  const connectionHealth: 'optimal' | 'idle' | 'warning' | 'disconnected' =
+    mqttDataFlow === 'healthy' ? 'optimal' :
+    mqttDataFlow === 'awaiting' ? 'idle' :
+    mqttDataFlow === 'stale' ? 'warning' : 'disconnected';
+
+  const mem = process.memoryUsage();
+  return {
+    mqttConnected,
+    mqttDataFlow,
+    lastTelemetryAgeSec,
+    mqttWatchdogTimeoutSec: watchdogTimeoutSec,
+    mqttReconnectCount,
+    mqttWatchdogReconnectCount,
+    mqttLastReconnectReason,
+    lastMqttConnectTime,
+    connectionHealth,
+    memoryRssMb: Number((mem.rss / 1024 / 1024).toFixed(1)),
+    memoryHeapUsedMb: Number((mem.heapUsed / 1024 / 1024).toFixed(1)),
+    wsStaleClientsTerminated,
+  };
+}
+
+function triggerMqttWatchdogRecovery(reason: string) {
+  const now = Date.now();
+  if (mqttRecoveryInProgress) return;
+  if (now - lastMqttRecoveryAttemptAt < MQTT_WATCHDOG_RECOVERY_COOLDOWN_MS) return;
+
+  lastMqttRecoveryAttemptAt = now;
+  mqttRecoveryInProgress = true;
+  mqttWatchdogReconnectCount++;
+  mqttLastReconnectReason = reason;
+
+  const broker = currentSettings.mqttBrokerUrl;
+  const topic = currentSettings.mqttTopic;
+  const oldClient = activeMqttClient;
+  activeMqttClient = null;
+
+  console.warn(`[MQTT WATCHDOG] ${reason}. Force reconnect ke ${broker} / ${topic}`);
+  try { oldClient?.end(true); } catch { /* ignore */ }
+
+  setTimeout(() => {
+    mqttRecoveryInProgress = false;
+    initMqtt(broker, topic);
+  }, 500);
 }
 
 function getDeviceStatusSnapshot() {
@@ -796,6 +893,13 @@ async function processIncomingTelemetry(rawPayload: unknown, source: 'mqtt' | 'l
       received_at: new Date().toISOString(),
     };
 
+    // Any valid packet arriving on the configured MQTT /data topic proves that the data
+    // path is alive. Update freshness BEFORE dedupe so a broker redelivery cannot make
+    // the watchdog falsely declare the connection stale.
+    if (source === 'mqtt') {
+      lastPeriodicTelemetryReceivedAt = Date.now();
+    }
+
     if (isDuplicateTelemetrySample(telemetryRecord)) {
       console.log(`[MQTT DEDUPE] Paket telemetry duplikat diabaikan: ${telemetrySampleKey(telemetryRecord)}`);
       return;
@@ -803,11 +907,6 @@ async function processIncomingTelemetry(rawPayload: unknown, source: 'mqtt' | 'l
 
     latestTelemetry = telemetryRecord;
     totalPacketsReceived++;
-
-    // Only a real packet arriving through the MQTT telemetry topic is evidence that the IoT device is online.
-    if (source === 'mqtt') {
-      lastPeriodicTelemetryReceivedAt = Date.now();
-    }
 
     telemetryHistory.push(telemetryRecord);
     if (telemetryHistory.length > MAX_HISTORY) {
@@ -865,13 +964,13 @@ let connectionCheckTimer: NodeJS.Timeout | null = null;
 let lastConnectionCheckTime = new Date().toISOString();
 
 function performConnectionCheck() {
-  const isConnected = Boolean(activeMqttClient && activeMqttClient.connected);
   lastConnectionCheckTime = new Date().toISOString();
+  const flow = getMqttFlowSnapshot();
 
-  // If MQTT broker link disconnected, attempt reconnect or reinit
-  if (!isConnected) {
+  // Broker socket down: let mqtt.js reconnect first; if the client object is gone, re-init.
+  if (!flow.mqttConnected && !mqttRecoveryInProgress) {
     if (activeMqttClient) {
-      console.log(`[Cek Koneksi ${currentSettings.connectionCheckIntervalSec}s] Broker MQTT belum terhubung, mencoba reconnect ke ${currentSettings.mqttBrokerUrl}...`);
+      console.log(`[Cek Koneksi ${currentSettings.connectionCheckIntervalSec}s] MQTT disconnected, memicu reconnect...`);
       try {
         activeMqttClient.reconnect();
       } catch (err) {
@@ -883,24 +982,23 @@ function performConnectionCheck() {
     }
   }
 
-  const now = Date.now();
-  const lastPacketDate = new Date(latestTelemetry.received_at || latestTelemetry.timestamp).getTime();
-  const sensorFreshnessSec = Math.max(0, Math.round((now - lastPacketDate) / 1000));
-  const healthStatus: 'optimal' | 'idle' | 'warning' | 'disconnected' = !isConnected
-    ? 'disconnected'
-    : sensorFreshnessSec <= currentSettings.connectionCheckIntervalSec * 2
-    ? 'optimal'
-    : 'idle';
-  const deviceStatusSnapshot = getDeviceStatusSnapshot();
+  // Important: client.connected can stay TRUE while message delivery has silently died.
+  // Recover based on real periodic /data traffic, not on the socket flag alone.
+  if (flow.mqttConnected && flow.mqttDataFlow === 'stale') {
+    const ageText = typeof flow.lastTelemetryAgeSec === 'number'
+      ? `${flow.lastTelemetryAgeSec}s tanpa telemetry`
+      : `belum ada telemetry setelah startup`;
+    triggerMqttWatchdogRecovery(`Data MQTT stale: ${ageText}`);
+  }
 
+  const deviceStatusSnapshot = getDeviceStatusSnapshot();
   broadcastToClients('mqtt:status', {
-    connected: isConnected,
+    connected: flow.mqttConnected,
     broker: currentSettings.mqttBrokerUrl,
     topic: currentSettings.mqttTopic,
     connectionCheckIntervalSec: currentSettings.connectionCheckIntervalSec,
     lastConnectionCheckTime,
-    connectionHealth: healthStatus,
-    sensorFreshnessSec,
+    ...flow,
     telegramDeduplicationActive: true,
     totalTelegramDispatched: lastSentTelegramState.totalAlertsDispatched,
     totalDuplicateAlertsSuppressed: lastSentTelegramState.totalDuplicateAlertsSuppressed,
@@ -933,64 +1031,57 @@ function initMqtt(brokerUrl: string, topic: string) {
   const cleanTopic = (topic || 'digitaltwin/lokasi1/data').trim();
   currentSettings.mqttTopic = cleanTopic;
 
-  if (activeMqttClient) {
-    try {
-      activeMqttClient.end(true);
-    } catch {
-      // ignore
-    }
+  const previousClient = activeMqttClient;
+  if (previousClient) {
+    try { previousClient.end(true); } catch { /* ignore */ }
   }
 
   console.log(`Connecting to MQTT Broker: ${normalizedBroker}, Topic: ${cleanTopic} (Cek koneksi tiap ${currentSettings.connectionCheckIntervalSec}s)`);
 
   try {
-    activeMqttClient = mqtt.connect(normalizedBroker, {
+    const client = mqtt.connect(normalizedBroker, {
       clientId: `river_dashboard_${Math.random().toString(16).substring(2, 10)}`,
       clean: true,
       connectTimeout: 10000,
       reconnectPeriod: 4000,
-      keepalive: currentSettings.connectionCheckIntervalSec, // Ping interval 10-30s
+      keepalive: currentSettings.connectionCheckIntervalSec,
     });
+    activeMqttClient = client;
 
-    activeMqttClient.on('connect', () => {
+    client.on('connect', () => {
+      if (activeMqttClient !== client) return;
+      lastMqttConnectTime = new Date().toISOString();
+      mqttRecoveryInProgress = false;
       console.log(`MQTT Connected to ${normalizedBroker} on topic: ${cleanTopic}`);
-      broadcastToClients('mqtt:status', { 
-        connected: true, 
-        broker: normalizedBroker, 
+      const flow = getMqttFlowSnapshot();
+      broadcastToClients('mqtt:status', {
+        connected: true,
+        broker: normalizedBroker,
         topic: cleanTopic,
         connectionCheckIntervalSec: currentSettings.connectionCheckIntervalSec,
         lastConnectionCheckTime: new Date().toISOString(),
-        connectionHealth: 'optimal',
+        ...flow,
       });
 
-      // Subscribe hanya ke topic yang memang dipakai aplikasi.
-      // Hindari wildcard tumpang tindih karena satu publikasi MQTT dapat cocok ke beberapa filter.
-      activeMqttClient?.subscribe(cleanTopic, { qos: 0 }, (err) => {
-        if (err) {
-          console.error('MQTT Telemetry subscription error:', err);
-        } else {
-          console.log(`MQTT Telemetry subscribed: ${cleanTopic}`);
-        }
+      client.subscribe(cleanTopic, { qos: 0 }, (err) => {
+        if (err) console.error('MQTT Telemetry subscription error:', err);
+        else console.log(`MQTT Telemetry subscribed: ${cleanTopic}`);
       });
 
-      activeMqttClient?.subscribe(DEVICE_STATUS_TOPIC, { qos: 0 }, (err) => {
-        if (err) {
-          console.error('MQTT Device status subscription error:', err);
-        } else {
-          console.log(`MQTT Device status subscribed: ${DEVICE_STATUS_TOPIC}`);
-        }
+      client.subscribe(DEVICE_STATUS_TOPIC, { qos: 0 }, (err) => {
+        if (err) console.error('MQTT Device status subscription error:', err);
+        else console.log(`MQTT Device status subscribed: ${DEVICE_STATUS_TOPIC}`);
       });
 
-      // Start / refresh the periodic connection check timer
       startConnectionCheckTimer(currentSettings.connectionCheckIntervalSec);
     });
 
-    activeMqttClient.on('message', async (receivedTopic, payload) => {
+    client.on('message', async (receivedTopic, payload) => {
+      if (activeMqttClient !== client) return;
       try {
         const str = payload.toString();
         console.log(`[MQTT RX] ${receivedTopic}`);
 
-        // Routing ketat: hanya topic yang dikonfigurasi yang boleh diproses.
         if (receivedTopic === DEVICE_STATUS_TOPIC) {
           processIncomingDeviceStatus(str);
           return;
@@ -1007,35 +1098,41 @@ function initMqtt(brokerUrl: string, topic: string) {
       }
     });
 
-    activeMqttClient.on('error', (err) => {
+    client.on('error', (err) => {
+      if (activeMqttClient !== client) return;
       console.warn('MQTT connection warning/error:', err.message);
-      broadcastToClients('mqtt:status', { 
-        connected: false, 
+      broadcastToClients('mqtt:status', {
+        connected: false,
         error: err.message,
         broker: normalizedBroker,
         topic: cleanTopic,
         connectionCheckIntervalSec: currentSettings.connectionCheckIntervalSec,
         lastConnectionCheckTime: new Date().toISOString(),
-        connectionHealth: 'disconnected',
+        ...getMqttFlowSnapshot(),
       });
     });
 
-    activeMqttClient.on('offline', () => {
-      broadcastToClients('mqtt:status', { 
-        connected: false, 
+    client.on('offline', () => {
+      if (activeMqttClient !== client) return;
+      broadcastToClients('mqtt:status', {
+        connected: false,
         offline: true,
         broker: normalizedBroker,
         topic: cleanTopic,
         connectionCheckIntervalSec: currentSettings.connectionCheckIntervalSec,
         lastConnectionCheckTime: new Date().toISOString(),
-        connectionHealth: 'disconnected',
+        ...getMqttFlowSnapshot(),
       });
     });
 
-    activeMqttClient.on('reconnect', () => {
+    client.on('reconnect', () => {
+      if (activeMqttClient !== client) return;
+      mqttReconnectCount++;
+      mqttLastReconnectReason = 'mqtt.js automatic reconnect';
       console.log(`[MQTT] Reconnecting to broker ${normalizedBroker} (${currentSettings.connectionCheckIntervalSec}s keepalive)...`);
     });
   } catch (err) {
+    mqttRecoveryInProgress = false;
     console.error('MQTT initialization error:', err);
   }
 }
@@ -1088,7 +1185,13 @@ async function initMongo(mongoUri: string) {
 }
 
 // WebSocket Connection Lifecycle
+const wsAlive = new WeakMap<WebSocket, boolean>();
+
 wss.on('connection', (ws) => {
+  wsAlive.set(ws, true);
+  ws.on('pong', () => wsAlive.set(ws, true));
+
+  const flow = getMqttFlowSnapshot();
   // Send initial snapshot
   ws.send(JSON.stringify({
     type: 'init',
@@ -1098,15 +1201,14 @@ wss.on('connection', (ws) => {
       alerts: alertHistory.slice(0, 30),
       settings: getPublicSettings(),
       status: {
-        mqttConnected: activeMqttClient?.connected || false,
         mqttBroker: currentSettings.mqttBrokerUrl,
         mqttTopic: currentSettings.mqttTopic,
+        ...flow,
         ...getDeviceStatusSnapshot(),
         connectionCheckIntervalSec: currentSettings.connectionCheckIntervalSec,
         lastConnectionCheckTime,
-        connectionHealth: activeMqttClient?.connected ? 'optimal' : 'disconnected',
         dbSaveIntervalMin: currentSettings.dbSaveIntervalMin || 5,
-        lastDbSaveTime: lastDbSaveTime,
+        lastDbSaveTime,
         totalDbSnapshotsSaved,
         mongoConnected: isMongoConnected,
         mongoDatabaseName: isMongoConnected ? 'river_flood_monitoring' : undefined,
@@ -1115,7 +1217,7 @@ wss.on('connection', (ws) => {
         totalTelegramDispatched: lastSentTelegramState.totalAlertsDispatched,
         totalDuplicateAlertsSuppressed: lastSentTelegramState.totalDuplicateAlertsSuppressed,
         lastSentTelegramWaterStatus: lastSentTelegramState.waterStatus || undefined,
-        lastPacketTime: latestTelemetry.timestamp,
+        lastPacketTime: lastPeriodicTelemetryReceivedAt > 0 ? latestTelemetry.timestamp : null,
         totalPacketsReceived,
         activeClientsCount: wss.clients.size,
         uptimeSeconds: Math.floor((Date.now() - appStartTime) / 1000),
@@ -1126,30 +1228,43 @@ wss.on('connection', (ws) => {
   ws.on('message', (message) => {
     try {
       const parsed = JSON.parse(message.toString());
-      if (parsed.type === 'ping') {
-        ws.send(JSON.stringify({ type: 'pong' }));
-      }
-    } catch {
-      // ignore
-    }
+      if (parsed.type === 'ping') ws.send(JSON.stringify({ type: 'pong' }));
+    } catch { /* ignore */ }
   });
 });
+
+// Native WebSocket ping/pong. Browsers answer ping frames automatically.
+// A dead browser/network path is terminated so it cannot accumulate forever.
+const wsHeartbeatTimer = setInterval(() => {
+  wss.clients.forEach((client) => {
+    if (client.readyState !== WebSocket.OPEN) return;
+    if (wsAlive.get(client) === false) {
+      wsStaleClientsTerminated++;
+      try { client.terminate(); } catch { /* ignore */ }
+      return;
+    }
+    wsAlive.set(client, false);
+    try { client.ping(); } catch {
+      try { client.terminate(); } catch { /* ignore */ }
+    }
+  });
+}, WS_HEARTBEAT_INTERVAL_MS);
+wsHeartbeatTimer.unref?.();
 
 // REST API Endpoints
 
 // 1. Health and Status
 app.get('/api/status', (_req, res) => {
-  const isConnected = Boolean(activeMqttClient && activeMqttClient.connected);
+  const flow = getMqttFlowSnapshot();
   const status: SystemStatus = {
-    mqttConnected: isConnected,
     mqttBroker: currentSettings.mqttBrokerUrl,
     mqttTopic: currentSettings.mqttTopic,
+    ...flow,
     ...getDeviceStatusSnapshot(),
     connectionCheckIntervalSec: currentSettings.connectionCheckIntervalSec,
     lastConnectionCheckTime,
-    connectionHealth: isConnected ? 'optimal' : 'disconnected',
     dbSaveIntervalMin: currentSettings.dbSaveIntervalMin || 5,
-    lastDbSaveTime: lastDbSaveTime,
+    lastDbSaveTime,
     totalDbSnapshotsSaved,
     mongoConnected: isMongoConnected,
     mongoDatabaseName: isMongoConnected ? 'river_flood_monitoring' : undefined,
@@ -1158,7 +1273,7 @@ app.get('/api/status', (_req, res) => {
     totalTelegramDispatched: lastSentTelegramState.totalAlertsDispatched,
     totalDuplicateAlertsSuppressed: lastSentTelegramState.totalDuplicateAlertsSuppressed,
     lastSentTelegramWaterStatus: lastSentTelegramState.waterStatus || undefined,
-    lastPacketTime: latestTelemetry?.timestamp || null,
+    lastPacketTime: lastPeriodicTelemetryReceivedAt > 0 ? latestTelemetry?.timestamp || null : null,
     totalPacketsReceived,
     activeClientsCount: wss.clients.size,
     uptimeSeconds: Math.floor((Date.now() - appStartTime) / 1000),
@@ -1525,6 +1640,18 @@ async function start() {
     console.log(`Server monitoring air sungai & cuaca berjalan di http://localhost:${PORT}`);
   });
 }
+
+async function gracefulShutdown(signal: string) {
+  console.log(`[System] ${signal} diterima, menutup koneksi dengan bersih...`);
+  if (connectionCheckTimer) clearInterval(connectionCheckTimer);
+  clearInterval(wsHeartbeatTimer);
+  try { activeMqttClient?.end(true); } catch { /* ignore */ }
+  try { await mongoClient?.close(); } catch { /* ignore */ }
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 5000).unref();
+}
+process.once('SIGTERM', () => { void gracefulShutdown('SIGTERM'); });
+process.once('SIGINT', () => { void gracefulShutdown('SIGINT'); });
 
 start().catch((err) => {
   console.error('Fatal server startup error:', err);
