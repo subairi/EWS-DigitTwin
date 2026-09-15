@@ -159,7 +159,11 @@ export default function App() {
   const [isSendingTelegram, setIsSendingTelegram] = useState(false);
 
   const socketRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const incomingTelemetryHandlerRef = useRef<(telemetry: RiverTelemetry) => void>(() => {});
+  const incomingAlertHandlerRef = useRef<(alert: AlertEvent) => void>(() => {});
+  const settingsLoadedRef = useRef(settingsLoaded);
 
   // Acknowledge Alarm Handler
   const handleAcknowledgeAlarm = useCallback(() => {
@@ -282,25 +286,52 @@ export default function App() {
     }
   }, [pushEnabled, soundMuted, settings.soundAlertEnabled, acknowledgedAlarmSignature]);
 
-  // Connect WebSocket to backend server
+  // Keep WebSocket callbacks current without rebuilding the WebSocket connection.
+  // This prevents state/config changes from creating parallel reconnect loops.
+  useEffect(() => { incomingTelemetryHandlerRef.current = handleIncomingTelemetry; }, [handleIncomingTelemetry]);
+  useEffect(() => { incomingAlertHandlerRef.current = handleIncomingAlert; }, [handleIncomingAlert]);
+  useEffect(() => {
+    settingsLoadedRef.current = settingsLoaded;
+  }, [settingsLoaded]);
+
+  // One browser tab = one WebSocket lifecycle. Reconnect is guarded so only one
+  // CONNECTING/OPEN socket and one reconnect timer can exist at a time.
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
+    let disposed = false;
 
-    function connectWs() {
+    const scheduleReconnect = () => {
+      if (disposed || reconnectTimeoutRef.current) return;
+      reconnectAttemptsRef.current += 1;
+      const delay = Math.min(15000, 2000 * Math.pow(2, Math.min(reconnectAttemptsRef.current - 1, 3)));
+      reconnectTimeoutRef.current = setTimeout(() => {
+        reconnectTimeoutRef.current = null;
+        connectWs();
+      }, delay);
+    };
+
+    const connectWs = () => {
+      if (disposed) return;
+      const existing = socketRef.current;
+      if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) return;
+
       try {
         const ws = new WebSocket(wsUrl);
         socketRef.current = ws;
 
         ws.onopen = () => {
-          // Browser -> backend WebSocket success is different from backend -> MQTT broker status.
-          fetch('/api/status')
-            .then((r) => r.json())
-            .then((s) => setStatus(s))
-            .catch(() => {});
+          if (disposed || socketRef.current !== ws) return;
+          reconnectAttemptsRef.current = 0;
+          if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = null;
+          }
+          fetch('/api/status').then((r) => r.json()).then((st) => setStatus(st)).catch(() => {});
         };
 
         ws.onmessage = (event) => {
+          if (disposed || socketRef.current !== ws) return;
           try {
             const data = JSON.parse(event.data);
             if (data.type === 'init') {
@@ -309,30 +340,38 @@ export default function App() {
               if (payload.history) setHistory(dedupeTelemetryHistory(payload.history));
               if (payload.alerts) setAlerts(payload.alerts);
               if (payload.status) setStatus(payload.status);
-              // The backend only starts after MongoDB settings are loaded. Use that
-              // snapshot on the first connection to avoid a brief fallback-default alert,
-              // but never overwrite settings after the operator has started editing.
-              if (!settingsLoaded && payload.settings) {
+              if (!settingsLoadedRef.current && payload.settings) {
                 setSettings((prev) => ({
                   ...prev,
                   ...payload.settings,
                   thresholds: { ...prev.thresholds, ...payload.settings.thresholds },
                 }));
+                settingsLoadedRef.current = true;
                 setSettingsLoaded(true);
               }
             } else if (data.type === 'telemetry:update') {
-              handleIncomingTelemetry(data.payload);
+              incomingTelemetryHandlerRef.current(data.payload);
             } else if (data.type === 'alert:new') {
-              handleIncomingAlert(data.payload);
+              incomingAlertHandlerRef.current(data.payload);
             } else if (data.type === 'mqtt:status') {
-              setStatus((prev) => ({ 
-                ...prev, 
-                mqttConnected: data.payload.connected,
+              setStatus((prev) => ({
+                ...prev,
+                mqttConnected: data.payload.connected ?? data.payload.mqttConnected ?? prev.mqttConnected,
                 mqttTopic: data.payload.topic || prev.mqttTopic,
                 mqttBroker: data.payload.broker || prev.mqttBroker,
                 connectionCheckIntervalSec: data.payload.connectionCheckIntervalSec ?? prev.connectionCheckIntervalSec,
                 lastConnectionCheckTime: data.payload.lastConnectionCheckTime || prev.lastConnectionCheckTime,
                 connectionHealth: data.payload.connectionHealth || prev.connectionHealth,
+                mqttDataFlow: data.payload.mqttDataFlow ?? prev.mqttDataFlow,
+                lastTelemetryAgeSec: data.payload.lastTelemetryAgeSec,
+                mqttWatchdogTimeoutSec: data.payload.mqttWatchdogTimeoutSec ?? prev.mqttWatchdogTimeoutSec,
+                mqttReconnectCount: data.payload.mqttReconnectCount ?? prev.mqttReconnectCount,
+                mqttWatchdogReconnectCount: data.payload.mqttWatchdogReconnectCount ?? prev.mqttWatchdogReconnectCount,
+                mqttLastReconnectReason: data.payload.mqttLastReconnectReason ?? prev.mqttLastReconnectReason,
+                lastMqttConnectTime: data.payload.lastMqttConnectTime ?? prev.lastMqttConnectTime,
+                memoryRssMb: data.payload.memoryRssMb ?? prev.memoryRssMb,
+                memoryHeapUsedMb: data.payload.memoryHeapUsedMb ?? prev.memoryHeapUsedMb,
+                wsStaleClientsTerminated: data.payload.wsStaleClientsTerminated ?? prev.wsStaleClientsTerminated,
                 telegramDeduplicationActive: data.payload.telegramDeduplicationActive ?? prev.telegramDeduplicationActive,
                 totalTelegramDispatched: data.payload.totalTelegramDispatched ?? prev.totalTelegramDispatched,
                 totalDuplicateAlertsSuppressed: data.payload.totalDuplicateAlertsSuppressed ?? prev.totalDuplicateAlertsSuppressed,
@@ -365,6 +404,7 @@ export default function App() {
                   ...cfg,
                   thresholds: { ...prev.thresholds, ...cfg.thresholds },
                 }));
+                settingsLoadedRef.current = true;
                 setSettingsLoaded(true);
               }
             } else if (data.type === 'mongo:status') {
@@ -377,26 +417,49 @@ export default function App() {
                 dbSaveIntervalMin: data.payload.dbSaveIntervalMin ?? prev.dbSaveIntervalMin,
               }));
             }
-          } catch {
-            // ignore malformed ws payload
-          }
+          } catch { /* ignore malformed ws payload */ }
         };
 
         ws.onclose = () => {
-          reconnectTimeoutRef.current = setTimeout(connectWs, 3000);
+          if (socketRef.current === ws) socketRef.current = null;
+          if (!disposed) scheduleReconnect();
         };
 
         ws.onerror = () => {
-          ws.close();
+          try { ws.close(); } catch { /* ignore */ }
         };
       } catch {
-        reconnectTimeoutRef.current = setTimeout(connectWs, 3000);
+        scheduleReconnect();
       }
-    }
+    };
 
     connectWs();
 
-    // Initial Fetch fallback
+    // Fallback reads in case the first WS init arrives late.
+    fetch('/api/status').then((r) => r.json()).then((st) => setStatus(st)).catch(() => {});
+    fetch('/api/alerts').then((r) => r.json()).then((a) => { if (Array.isArray(a)) setAlerts(a); }).catch(() => {});
+
+    return () => {
+      disposed = true;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      const ws = socketRef.current;
+      socketRef.current = null;
+      if (ws) {
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onclose = null;
+        ws.onerror = null;
+        try { ws.close(); } catch { /* ignore */ }
+      }
+    };
+  }, []);
+
+  // History filtering is independent from the WebSocket lifecycle. Changing the
+  // chart range must never tear down/recreate the live WebSocket connection.
+  useEffect(() => {
     fetch(`/api/telemetry/history?timeRange=${activeTimeRange}`)
       .then((r) => r.json())
       .then((data) => {
@@ -407,24 +470,7 @@ export default function App() {
         }
       })
       .catch(() => {});
-
-    fetch('/api/status')
-      .then((r) => r.json())
-      .then((s) => setStatus(s))
-      .catch(() => {});
-
-    fetch('/api/alerts')
-      .then((r) => r.json())
-      .then((a) => {
-        if (Array.isArray(a)) setAlerts(a);
-      })
-      .catch(() => {});
-
-    return () => {
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (socketRef.current) socketRef.current.close();
-    };
-  }, [activeTimeRange, handleIncomingTelemetry, handleIncomingAlert]);
+  }, [activeTimeRange]);
 
   // Load persisted configuration exactly once per browser page load.
   // Keeping this separate from the WebSocket lifecycle avoids resetting the

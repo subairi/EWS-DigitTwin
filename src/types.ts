@@ -107,6 +107,16 @@ export interface SystemStatus {
   connectionCheckIntervalSec: number;
   lastConnectionCheckTime?: string;
   connectionHealth?: 'optimal' | 'idle' | 'warning' | 'disconnected';
+  mqttDataFlow?: 'awaiting' | 'healthy' | 'stale' | 'disconnected';
+  lastTelemetryAgeSec?: number;
+  mqttWatchdogTimeoutSec?: number;
+  mqttReconnectCount?: number;
+  mqttWatchdogReconnectCount?: number;
+  mqttLastReconnectReason?: string;
+  lastMqttConnectTime?: string;
+  memoryRssMb?: number;
+  memoryHeapUsedMb?: number;
+  wsStaleClientsTerminated?: number;
   dbSaveIntervalMin: number;
   lastDbSaveTime?: string;
   totalDbSnapshotsSaved?: number;
