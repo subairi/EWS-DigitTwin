@@ -64,6 +64,9 @@ export const Header: React.FC<HeaderProps> = ({
   onAcknowledgeAlarm,
 }) => {
   const csvRangeShortLabel = { '1d': '1H', '7d': '7H', '30d': '30H', all: 'ALL' }[csvRange];
+  const mqttFlowStale = status.mqttDataFlow === 'stale';
+  const mqttFlowAwaiting = status.mqttDataFlow === 'awaiting';
+  const mqttHealthy = status.mqttConnected && !mqttFlowStale && !mqttFlowAwaiting;
 
   return (
     <header className="border-b border-slate-200/80 bg-white/95 backdrop-blur-md sticky top-0 z-40 shadow-xs dark:bg-slate-900/95 dark:border-slate-800/80">
@@ -162,17 +165,27 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             )}
 
-            {/* MQTT Badge */}
-            <div 
+            {/* MQTT Badge: broker socket + actual telemetry flow */}
+            <div
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                status.mqttConnected 
-                  ? 'bg-emerald-50/90 text-emerald-700 border-emerald-200/90 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/80' 
+                mqttHealthy
+                  ? 'bg-emerald-50/90 text-emerald-700 border-emerald-200/90 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/80'
+                  : mqttFlowStale
+                  ? 'bg-rose-50/90 text-rose-700 border-rose-200/90 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/80'
                   : 'bg-amber-50/90 text-amber-700 border-amber-200/90 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/80'
               }`}
-              title={`Broker: ${status.mqttBroker} | Topik: ${status.mqttTopic} | Cek Koneksi: Tiap ${status.connectionCheckIntervalSec || 15}s (10-30 detik)`}
+              title={`Broker: ${status.mqttBroker} | Topik: ${status.mqttTopic} | Aliran data: ${status.mqttDataFlow || '-'} | Umur telemetry: ${status.lastTelemetryAgeSec ?? '-'}s | Watchdog: ${status.mqttWatchdogTimeoutSec ?? 60}s | Auto-recovery: ${status.mqttWatchdogReconnectCount ?? 0}x`}
             >
-              <Radio className={`h-3.5 w-3.5 ${status.mqttConnected ? 'animate-pulse text-emerald-600 dark:text-emerald-400' : 'text-amber-500'}`} />
-              <span>MQTT: {status.mqttConnected ? `EMQX (${status.connectionCheckIntervalSec || 15}s)` : 'Reconnecting'}</span>
+              <Radio className={`h-3.5 w-3.5 ${mqttHealthy ? 'animate-pulse text-emerald-600 dark:text-emerald-400' : mqttFlowStale ? 'text-rose-500' : 'text-amber-500'}`} />
+              <span>
+                MQTT: {mqttFlowStale
+                  ? 'Data Stale'
+                  : mqttFlowAwaiting
+                  ? 'Menunggu Data'
+                  : status.mqttConnected
+                  ? 'EMQX'
+                  : 'Reconnecting'}
+              </span>
             </div>
 
             {/* Physical IoT device presence derived from periodic telemetry */}
