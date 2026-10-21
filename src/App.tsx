@@ -11,6 +11,9 @@ import {
 import { 
   MetricCards 
 } from './components/MetricCards';
+import {
+  DischargeEstimateCard
+} from './components/DischargeEstimateCard';
 import { 
   AnalyticsCharts 
 } from './components/AnalyticsCharts';
@@ -749,9 +752,10 @@ export default function App() {
               />
             </div>
 
-            {/* Environmental Microclimate & Battery Cards (2 Cols) */}
+            {/* Environmental Microclimate, Battery & Estimated River Discharge (2 Cols) */}
             <div className="lg:col-span-2">
               <MetricCards telemetry={latest} thresholds={settings.thresholds} />
+              <DischargeEstimateCard riverLevelM={latest.river_level_m} />
             </div>
           </div>
 
