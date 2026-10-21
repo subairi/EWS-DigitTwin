@@ -755,7 +755,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* 3. CCTV Live Monitoring */}
+          {/* 3. Compact CCTV monitoring - directly below sensor metric cards */}
           <CctvPanel url="https://cctv.digitaltwin.sbs/cctv/" />
 
           {/* 4. Analytics Charts & Alerts EWS Split Grid */}
