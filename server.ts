@@ -16,6 +16,10 @@ const SETTINGS_COLLECTION = 'system_settings';
 const SETTINGS_DOCUMENT_ID = 'global';
 const MQTT_WATCHDOG_MIN_TIMEOUT_SEC = Math.max(60, Number(process.env.MQTT_WATCHDOG_TIMEOUT_SEC) || 60);
 const MQTT_WATCHDOG_RECOVERY_COOLDOWN_MS = Math.max(60_000, Number(process.env.MQTT_WATCHDOG_RECOVERY_COOLDOWN_MS) || 5 * 60_000);
+// When the broker socket is fully disconnected, do not rely forever on mqtt.js'
+// internal reconnect loop. Rebuild a fresh client periodically so DNS/socket/client
+// state is reset even if the old client gets stuck.
+const MQTT_DISCONNECTED_REBUILD_COOLDOWN_MS = Math.max(60_000, Number(process.env.MQTT_DISCONNECTED_REBUILD_COOLDOWN_MS) || 60_000);
 const WS_HEARTBEAT_INTERVAL_MS = 30_000;
 const WS_MAX_BUFFERED_BYTES = 1_000_000;
 const app = express();
@@ -37,9 +41,13 @@ let lastPeriodicTelemetryReceivedAt = 0;
 let lastMqttConnectTime: string | undefined;
 let mqttReconnectCount = 0;
 let mqttWatchdogReconnectCount = 0;
+let mqttHardReconnectCount = 0;
 let mqttLastReconnectReason: string | undefined;
 let lastMqttRecoveryAttemptAt = 0;
 let mqttRecoveryInProgress = false;
+let lastMqttDisconnectedAt: string | undefined;
+let lastMqttCloseAt: string | undefined;
+let lastMqttError: string | undefined;
 let wsStaleClientsTerminated = 0;
 
 // Settings with defaults
@@ -422,8 +430,13 @@ function getMqttFlowSnapshot() {
     mqttWatchdogTimeoutSec: watchdogTimeoutSec,
     mqttReconnectCount,
     mqttWatchdogReconnectCount,
+    mqttHardReconnectCount,
     mqttLastReconnectReason,
     lastMqttConnectTime,
+    lastMqttDisconnectedAt,
+    lastMqttCloseAt,
+    lastMqttError,
+    mqttDisconnectedRebuildCooldownSec: Math.round(MQTT_DISCONNECTED_REBUILD_COOLDOWN_MS / 1000),
     connectionHealth,
     memoryRssMb: Number((mem.rss / 1024 / 1024).toFixed(1)),
     memoryHeapUsedMb: Number((mem.heapUsed / 1024 / 1024).toFixed(1)),
@@ -431,14 +444,15 @@ function getMqttFlowSnapshot() {
   };
 }
 
-function triggerMqttWatchdogRecovery(reason: string) {
+function triggerMqttWatchdogRecovery(reason: string, cooldownMs = MQTT_WATCHDOG_RECOVERY_COOLDOWN_MS) {
   const now = Date.now();
-  if (mqttRecoveryInProgress) return;
-  if (now - lastMqttRecoveryAttemptAt < MQTT_WATCHDOG_RECOVERY_COOLDOWN_MS) return;
+  if (mqttRecoveryInProgress) return false;
+  if (now - lastMqttRecoveryAttemptAt < cooldownMs) return false;
 
   lastMqttRecoveryAttemptAt = now;
   mqttRecoveryInProgress = true;
   mqttWatchdogReconnectCount++;
+  mqttHardReconnectCount++;
   mqttLastReconnectReason = reason;
 
   const broker = currentSettings.mqttBrokerUrl;
@@ -446,13 +460,20 @@ function triggerMqttWatchdogRecovery(reason: string) {
   const oldClient = activeMqttClient;
   activeMqttClient = null;
 
-  console.warn(`[MQTT WATCHDOG] ${reason}. Force reconnect ke ${broker} / ${topic}`);
-  try { oldClient?.end(true); } catch { /* ignore */ }
+  console.warn(`[MQTT WATCHDOG] ${reason}. Buang client lama dan buat koneksi baru ke ${broker} / ${topic}`);
+
+  if (oldClient) {
+    // Detach handlers before force-closing so an obsolete client cannot update state
+    // or schedule its own reconnect after the replacement client is created.
+    try { oldClient.removeAllListeners(); } catch { /* ignore */ }
+    try { oldClient.end(true); } catch { /* ignore */ }
+  }
 
   setTimeout(() => {
     mqttRecoveryInProgress = false;
     initMqtt(broker, topic);
-  }, 500);
+  }, 750);
+  return true;
 }
 
 function getDeviceStatusSnapshot() {
@@ -967,18 +988,16 @@ function performConnectionCheck() {
   lastConnectionCheckTime = new Date().toISOString();
   const flow = getMqttFlowSnapshot();
 
-  // Broker socket down: let mqtt.js reconnect first; if the client object is gone, re-init.
+  // If the broker socket is down, mqtt.js still gets its normal 4-second reconnect loop.
+  // In addition, the supervisor periodically discards the whole client and creates a fresh
+  // one. This fixes the observed state where reconnect() itself stopped making progress.
   if (!flow.mqttConnected && !mqttRecoveryInProgress) {
-    if (activeMqttClient) {
-      console.log(`[Cek Koneksi ${currentSettings.connectionCheckIntervalSec}s] MQTT disconnected, memicu reconnect...`);
-      try {
-        activeMqttClient.reconnect();
-      } catch (err) {
-        console.warn('Gagal memicu reconnect MQTT, inisialisasi ulang:', err);
-        initMqtt(currentSettings.mqttBrokerUrl, currentSettings.mqttTopic);
-      }
-    } else {
-      initMqtt(currentSettings.mqttBrokerUrl, currentSettings.mqttTopic);
+    const didHardRecover = triggerMqttWatchdogRecovery(
+      'MQTT disconnected: fresh-client recovery',
+      MQTT_DISCONNECTED_REBUILD_COOLDOWN_MS,
+    );
+    if (!didHardRecover) {
+      console.log(`[Cek Koneksi ${currentSettings.connectionCheckIntervalSec}s] MQTT masih disconnected; menunggu recovery window berikutnya...`);
     }
   }
 
@@ -1033,6 +1052,7 @@ function initMqtt(brokerUrl: string, topic: string) {
 
   const previousClient = activeMqttClient;
   if (previousClient) {
+    try { previousClient.removeAllListeners(); } catch { /* ignore */ }
     try { previousClient.end(true); } catch { /* ignore */ }
   }
 
@@ -1051,6 +1071,8 @@ function initMqtt(brokerUrl: string, topic: string) {
     client.on('connect', () => {
       if (activeMqttClient !== client) return;
       lastMqttConnectTime = new Date().toISOString();
+      lastMqttDisconnectedAt = undefined;
+      lastMqttError = undefined;
       mqttRecoveryInProgress = false;
       console.log(`MQTT Connected to ${normalizedBroker} on topic: ${cleanTopic}`);
       const flow = getMqttFlowSnapshot();
@@ -1100,6 +1122,7 @@ function initMqtt(brokerUrl: string, topic: string) {
 
     client.on('error', (err) => {
       if (activeMqttClient !== client) return;
+      lastMqttError = err.message;
       console.warn('MQTT connection warning/error:', err.message);
       broadcastToClients('mqtt:status', {
         connected: false,
@@ -1114,6 +1137,7 @@ function initMqtt(brokerUrl: string, topic: string) {
 
     client.on('offline', () => {
       if (activeMqttClient !== client) return;
+      lastMqttDisconnectedAt = lastMqttDisconnectedAt || new Date().toISOString();
       broadcastToClients('mqtt:status', {
         connected: false,
         offline: true,
@@ -1123,6 +1147,19 @@ function initMqtt(brokerUrl: string, topic: string) {
         lastConnectionCheckTime: new Date().toISOString(),
         ...getMqttFlowSnapshot(),
       });
+    });
+
+    client.on('close', () => {
+      if (activeMqttClient !== client) return;
+      lastMqttCloseAt = new Date().toISOString();
+      lastMqttDisconnectedAt = lastMqttDisconnectedAt || lastMqttCloseAt;
+      console.warn(`[MQTT] Socket closed at ${lastMqttCloseAt}`);
+    });
+
+    client.on('end', () => {
+      if (activeMqttClient !== client) return;
+      lastMqttDisconnectedAt = lastMqttDisconnectedAt || new Date().toISOString();
+      console.warn('[MQTT] Client ended');
     });
 
     client.on('reconnect', () => {
