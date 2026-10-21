@@ -20,6 +20,9 @@ import {
 import { 
   DataTable 
 } from './components/DataTable';
+import {
+  CctvPanel
+} from './components/CctvPanel';
 import { 
   SettingsModal 
 } from './components/SettingsModal';
@@ -752,7 +755,10 @@ export default function App() {
             </div>
           </div>
 
-          {/* 3. Analytics Charts & Alerts EWS Split Grid */}
+          {/* 3. CCTV Live Monitoring */}
+          <CctvPanel url="https://cctv.digitaltwin.sbs/cctv/" />
+
+          {/* 4. Analytics Charts & Alerts EWS Split Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Interactive Trends Graph (2 Cols) */}
             <div className="lg:col-span-2">
@@ -777,7 +783,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* 4. Full Historical Data Table with CSV Export */}
+          {/* 5. Full Historical Data Table with CSV Export */}
           <DataTable
             history={history}
             onExportCsv={() => handleExportCsv(csvRange)}
