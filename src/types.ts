@@ -112,8 +112,13 @@ export interface SystemStatus {
   mqttWatchdogTimeoutSec?: number;
   mqttReconnectCount?: number;
   mqttWatchdogReconnectCount?: number;
+  mqttHardReconnectCount?: number;
   mqttLastReconnectReason?: string;
   lastMqttConnectTime?: string;
+  lastMqttDisconnectedAt?: string;
+  lastMqttCloseAt?: string;
+  lastMqttError?: string;
+  mqttDisconnectedRebuildCooldownSec?: number;
   memoryRssMb?: number;
   memoryHeapUsedMb?: number;
   wsStaleClientsTerminated?: number;
