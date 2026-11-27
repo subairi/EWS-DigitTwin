@@ -132,6 +132,7 @@ export default function App() {
   const [soundMuted, setSoundMuted] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [activeTimeRange, setActiveTimeRange] = useState('24h');
+  const [historySource, setHistorySource] = useState<'mongodb' | 'memory'>('memory');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') return 'light';
     const savedTheme = window.localStorage.getItem('ews-theme');
@@ -193,7 +194,7 @@ export default function App() {
       const incomingKey = telemetryIdentity(telemetry);
       const exists = prev.some((item) => telemetryIdentity(item) === incomingKey);
       if (exists) return prev;
-      return [...prev, telemetry].slice(-300);
+      return [...prev, telemetry].slice(-1000);
     });
 
     // Do not evaluate alarms with fallback defaults before persisted settings finish loading.
@@ -465,18 +466,30 @@ export default function App() {
 
   // History filtering is independent from the WebSocket lifecycle. Changing the
   // chart range must never tear down/recreate the live WebSocket connection.
+  // Also re-fetches automatically if MongoDB connects after startup.
   useEffect(() => {
-    fetch(`/api/telemetry/history?timeRange=${activeTimeRange}`)
-      .then((r) => r.json())
+    const controller = new AbortController();
+    const limit = activeTimeRange === '30d' ? 1200 : activeTimeRange === '7d' ? 1000 : activeTimeRange === '24h' ? 600 : 250;
+    fetch(`/api/telemetry/history?timeRange=${activeTimeRange}&limit=${limit}`, { signal: controller.signal })
+      .then(async (r) => {
+        const source = r.headers.get('X-Data-Source');
+        if (source === 'mongodb' || source === 'memory') {
+          setHistorySource(source);
+        }
+        return r.json();
+      })
       .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
+        if (Array.isArray(data)) {
           const unique = dedupeTelemetryHistory(data);
           setHistory(unique);
-          setLatest(unique[unique.length - 1]);
+          if (unique.length > 0) {
+            setLatest(unique[unique.length - 1]);
+          }
         }
       })
       .catch(() => {});
-  }, [activeTimeRange]);
+    return () => controller.abort();
+  }, [activeTimeRange, status.mongoConnected]);
 
   // Load persisted configuration exactly once per browser page load.
   // Keeping this separate from the WebSocket lifecycle avoids resetting the
@@ -508,7 +521,7 @@ export default function App() {
     const permission = await requestNotificationPermission();
     if (permission === 'granted') {
       setPushEnabled(true);
-      sendLocalPushNotification('Sistem Monitoring Sungai', {
+      sendLocalPushNotification('Kaliwatu Arung Jeram & EWS Monitor', {
         body: 'Notifikasi push berhasil diaktifkan untuk peringatan dini bencana.',
       });
     } else {
@@ -524,10 +537,13 @@ export default function App() {
     alarmAudio.setMuted(newMuted);
   };
 
-  // CSV Export handler - default 7 hari, dapat dipilih 1/7/30 hari atau semua data
-  const handleExportCsv = (range: '1d' | '7d' | '30d' | 'all' = csvRange) => {
+  // CSV Export handler - mendukung rentang grafik (1h/6h/24h/7d/30d) & tabel (1d/7d/30d/all)
+  const handleExportCsv = (range: '1h' | '6h' | '24h' | '1d' | '7d' | '30d' | 'all' = csvRange) => {
     setIsExporting(true);
     const rangeLabel = {
+      '1h': '1jam',
+      '6h': '6jam',
+      '24h': '24jam',
       '1d': '1hari',
       '7d': '7hari',
       '30d': '30hari',
@@ -622,12 +638,6 @@ export default function App() {
   // Change chart time range
   const handleChangeTimeRange = (range: string) => {
     setActiveTimeRange(range);
-    fetch(`/api/telemetry/history?timeRange=${range}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data)) setHistory(dedupeTelemetryHistory(data));
-      })
-      .catch(() => {});
   };
 
   return (
@@ -771,6 +781,10 @@ export default function App() {
                 thresholds={settings.thresholds}
                 activeTimeRange={activeTimeRange}
                 onChangeTimeRange={handleChangeTimeRange}
+                onExportCsv={(range) => handleExportCsv(range)}
+                isExporting={isExporting}
+                dataSource={historySource}
+                mongoConnected={status.mongoConnected}
               />
             </div>
 
@@ -799,18 +813,26 @@ export default function App() {
         </main>
       )}
 
-      {/* Footer */}
-      <footer className="border-t border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 py-4.5 mt-8">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs text-slate-500 dark:text-slate-400">
-          <div>
-            Sistem Mitigasi Banjir & Keselamatan Wisata Arung Jeram • <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Tampilan UI Real-time Dinamis</span> (tiap paket MQTT) • Database: <span className="font-semibold text-slate-700 dark:text-slate-300">Snapshot Tiap {status.dbSaveIntervalMin || 5} Menit</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <span>Topik: <code className="font-mono text-indigo-600 dark:text-indigo-400">{status.mqttTopic}</code></span>
-            <span>•</span>
-            <span>MongoDB Atlas</span>
-            <span>•</span>
-            <span>Telegram EWS</span>
+      {/* Footer: Powered by Teknik Elektro & Unmer Malang */}
+      <footer className="border-t border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 py-4 sm:py-5 mt-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
+          <span className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400">
+            Powered by
+          </span>
+          <div className="inline-flex flex-wrap items-center justify-center gap-4 sm:gap-5 px-4 py-2 rounded-xl bg-slate-50/90 dark:bg-white/95 border border-slate-200/80 dark:border-slate-200/20 shadow-2xs">
+            <img
+              src="/assets/aistudio/logo_PSTE_38b329ab.png"
+              alt="Program Studi Teknik Elektro"
+              referrerPolicy="no-referrer"
+              className="h-8 sm:h-10 w-auto object-contain shrink-0"
+            />
+            <span className="h-6 sm:h-7 w-px bg-slate-300/90 shrink-0" aria-hidden="true" />
+            <img
+              src="/assets/aistudio/unmerBLACK_32ab4efb.png"
+              alt="Universitas Merdeka Malang"
+              referrerPolicy="no-referrer"
+              className="h-6 sm:h-8 w-auto object-contain shrink-0"
+            />
           </div>
         </div>
       </footer>
