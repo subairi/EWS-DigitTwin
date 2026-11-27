@@ -68,14 +68,14 @@ export const DataTable: React.FC<DataTableProps> = ({
 
         <div className="flex flex-wrap items-center gap-2.5">
           {/* Search Box */}
-          <div className="relative">
+          <div className="relative flex-1 min-w-[160px] sm:flex-none">
             <Search className="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               placeholder="Cari waktu / status..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-8 pr-3 py-2 text-xs rounded-xl border border-slate-200/90 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/80 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500 w-48 sm:w-56"
+              className="pl-8 pr-3 py-2 text-xs rounded-xl border border-slate-200/90 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/80 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500 w-full sm:w-56"
             />
           </div>
 
