@@ -69,35 +69,37 @@ export const Header: React.FC<HeaderProps> = ({
   const mqttHealthy = status.mqttConnected && !mqttFlowStale && !mqttFlowAwaiting;
 
   return (
-    <header className="border-b border-slate-200/80 bg-white/95 backdrop-blur-md sticky top-0 z-40 shadow-xs dark:bg-slate-900/95 dark:border-slate-800/80">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-          {/* Logo and Brand Title & Page Tabs */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-            <div className="flex items-center gap-3">
-              <div 
+    <header className="border-b border-slate-200/80 bg-white/95 backdrop-blur-md lg:sticky lg:top-0 z-40 shadow-xs dark:bg-slate-900/95 dark:border-slate-800/80">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3">
+        <div className="flex flex-col gap-2.5">
+          {/* Row 1: Logo, Full Brand Title & Page Navigation Tabs */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <button
+                type="button"
                 onClick={() => onNavigate?.('dashboard')}
-                className="h-10 w-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-xs shadow-indigo-600/25 shrink-0 cursor-pointer"
+                className="h-11 sm:h-12 px-1.5 py-1 rounded-xl bg-white border border-slate-200/90 shadow-2xs shrink-0 flex items-center justify-center cursor-pointer hover:border-indigo-300 transition"
+                aria-label="Kembali ke Dashboard Kaliwatu"
               >
-                <Waves className="h-5 w-5 stroke-[2.2]" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 
-                    onClick={() => onNavigate?.('dashboard')}
-                    className="text-base sm:text-lg font-bold text-slate-900 tracking-tight dark:text-white cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition"
-                  >
-                    RIVERFLOW MONITOR & EWS
-                  </h1>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/80">
-                    SafeGuard
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                <img
+                  src="/assets/aistudio/logo_kaliwatu_ec0fade4.png"
+                  alt="Logo Kaliwatu Arung Jeram"
+                  referrerPolicy="no-referrer"
+                  className="h-8 sm:h-9 w-auto object-contain"
+                />
+              </button>
+              <div className="min-w-0">
+                <h1
+                  onClick={() => onNavigate?.('dashboard')}
+                  className="text-base sm:text-lg lg:text-xl font-extrabold text-slate-900 tracking-tight leading-snug dark:text-white cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition"
+                >
+                  Kaliwatu Arung Jeram &amp; EWS Monitor
+                </h1>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
                   <span>Sensor: <strong className="font-semibold text-slate-700 dark:text-slate-300">{latest.device}</strong> ({latest.location})</span>
-                  <span className="text-slate-300 dark:text-slate-600">•</span>
-                  <span className="flex items-center gap-1 font-mono">
-                    <Clock className="h-3 w-3" />
+                  <span className="text-slate-300 dark:text-slate-600 hidden sm:inline">•</span>
+                  <span className="flex items-center gap-1 font-mono tabular-nums whitespace-nowrap">
+                    <Clock className="h-3 w-3 shrink-0" />
                     {latest.timestamp}
                   </span>
                 </p>
@@ -106,12 +108,12 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Top Page Navigation Tabs */}
             {onNavigate && (
-              <div className="flex items-center bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/80 shrink-0">
+              <div className="flex items-center self-start md:self-auto bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/80 shrink-0">
                 <button
                   id="nav-tab-dashboard"
                   type="button"
                   onClick={() => onNavigate('dashboard')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap shrink-0 cursor-pointer ${
                     currentPage === 'dashboard'
                       ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -125,7 +127,7 @@ export const Header: React.FC<HeaderProps> = ({
                   id="nav-tab-config"
                   type="button"
                   onClick={() => onNavigate('configuration')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap shrink-0 cursor-pointer ${
                     currentPage === 'configuration'
                       ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -138,8 +140,9 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          {/* System Status Indicators & Quick Actions */}
-          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+          {/* Row 2: System Status Indicators & Quick Actions */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/80">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             {/* ACK Alarm Button (If currently sounding) */}
             {isAlarmSounding && onAcknowledgeAlarm && (
               <button
@@ -231,7 +234,10 @@ export const Header: React.FC<HeaderProps> = ({
               <Send className={`h-3.5 w-3.5 ${status.telegramConfigured ? 'text-sky-500' : 'text-slate-400'}`} />
               <span>Telegram: {status.telegramConfigured ? 'EWS Siap' : 'Off'}</span>
             </div>
+            </div>
 
+            {/* Quick Action Controls */}
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             {/* Light / Dark Theme Toggle */}
             <button
               id="btn-toggle-theme"
@@ -286,7 +292,7 @@ export const Header: React.FC<HeaderProps> = ({
               id="btn-open-simulator"
               type="button"
               onClick={onOpenSimulator}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-xs font-semibold shadow-xs transition-colors"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-xs font-semibold shadow-xs transition-colors whitespace-nowrap shrink-0"
               title="Kirim atau simulasikan payload telemetry MQTT hulu"
             >
               <Laptop className="h-3.5 w-3.5" />
@@ -299,7 +305,7 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               onClick={onExportCsv}
               disabled={isExporting}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 active:bg-black text-white text-xs font-semibold shadow-xs transition-colors dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 active:bg-black text-white text-xs font-semibold shadow-xs transition-colors dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white disabled:opacity-50 whitespace-nowrap shrink-0"
               title={`Download CSV rentang ${csvRange === 'all' ? 'Semua Data' : csvRange === '1d' ? '1 Hari' : csvRange === '7d' ? '7 Hari' : '30 Hari'}`}
             >
               <Download className="h-3.5 w-3.5" />
@@ -320,6 +326,7 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Sliders className="h-4 w-4" />
             </button>
+            </div>
           </div>
         </div>
       </div>
