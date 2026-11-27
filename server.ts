@@ -244,7 +244,7 @@ const initialSamplePacket: RiverTelemetry = {
 };
 
 // In-memory stores
-const MAX_HISTORY = 1000;
+const MAX_HISTORY = 3000;
 let telemetryHistory: RiverTelemetry[] = [];
 let latestTelemetry: RiverTelemetry = { ...initialSamplePacket };
 let alertHistory: AlertEvent[] = [];
@@ -503,7 +503,7 @@ function getDeviceStatusSnapshot() {
     deviceStatusTimeoutSec: timeoutSec,
     deviceStatusTopic: currentSettings.mqttTopic,
     deviceStatusMessage: deviceOnline ? 'online' : 'offline',
-    devicePresenceSource: 'telemetry',
+    devicePresenceSource: 'telemetry' as const,
     deviceDataIntervalSec: dataIntervalSec,
     deviceDataTopic: currentSettings.mqttTopic,
     lastDeviceEventAt: latestDeviceStatus?.received_at,
@@ -1327,10 +1327,23 @@ app.get('/api/telemetry/latest', (_req, res) => {
   res.json(latestTelemetry);
 });
 
+function downsampleTelemetry<T>(records: T[], maxPoints: number): T[] {
+  if (records.length <= maxPoints || maxPoints < 3) return records;
+  const result: T[] = [records[0]];
+  const step = (records.length - 1) / (maxPoints - 1);
+  for (let i = 1; i < maxPoints - 1; i++) {
+    result.push(records[Math.round(i * step)]);
+  }
+  result.push(records[records.length - 1]);
+  return result;
+}
+
 // 3. Telemetry History with Filter
 app.get('/api/telemetry/history', async (req, res) => {
-  const limit = Math.min(Number(req.query.limit) || 100, 1000);
   const timeRange = (req.query.timeRange as string) || '24h';
+  const defaultLimit = timeRange === '30d' ? 1200 : timeRange === '7d' ? 1000 : timeRange === '24h' ? 600 : 250;
+  const maxPoints = Math.min(Number(req.query.limit) || defaultLimit, 5000);
+  const mongoFetchCap = timeRange === '30d' ? 12000 : timeRange === '7d' ? 4000 : 2000;
 
   // If MongoDB is connected and has records, query from Atlas
   if (isMongoConnected && mongoDb) {
@@ -1345,17 +1358,21 @@ app.get('/api/telemetry/history', async (req, res) => {
         timeQuery = { createdAt: { $gte: new Date(now - 24 * 60 * 60 * 1000) } };
       } else if (timeRange === '7d') {
         timeQuery = { createdAt: { $gte: new Date(now - 7 * 24 * 60 * 60 * 1000) } };
+      } else if (timeRange === '30d') {
+        timeQuery = { createdAt: { $gte: new Date(now - 30 * 24 * 60 * 60 * 1000) } };
       }
 
       const records = await mongoDb.collection('telemetry_records')
         .find(timeQuery)
         .sort({ createdAt: -1 })
-        .limit(limit)
+        .limit(mongoFetchCap)
         .toArray();
 
       if (records.length > 0) {
-        const uniqueRecords = dedupeTelemetryRecords(records);
-        return res.json(uniqueRecords.reverse());
+        const uniqueRecords = dedupeTelemetryRecords(records as unknown as Partial<RiverTelemetry>[]).reverse();
+        const sampled = downsampleTelemetry(uniqueRecords, maxPoints);
+        res.setHeader('X-Data-Source', 'mongodb');
+        return res.json(sampled);
       }
     } catch (err) {
       console.warn('MongoDB query fallback to memory:', err);
@@ -1365,17 +1382,27 @@ app.get('/api/telemetry/history', async (req, res) => {
   // Fallback to in-memory history
   let filtered = [...telemetryHistory];
   const now = Date.now();
+  const getMs = (t: RiverTelemetry) => {
+    const raw = t.received_at || t.timestamp;
+    const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+    const ms = Date.parse(normalized);
+    return Number.isFinite(ms) ? ms : 0;
+  };
   if (timeRange === '1h') {
-    filtered = filtered.filter((t) => (now - new Date(t.received_at || t.timestamp).getTime()) <= 60 * 60 * 1000);
+    filtered = filtered.filter((t) => (now - getMs(t)) <= 60 * 60 * 1000);
   } else if (timeRange === '6h') {
-    filtered = filtered.filter((t) => (now - new Date(t.received_at || t.timestamp).getTime()) <= 6 * 60 * 60 * 1000);
+    filtered = filtered.filter((t) => (now - getMs(t)) <= 6 * 60 * 60 * 1000);
   } else if (timeRange === '24h') {
-    filtered = filtered.filter((t) => (now - new Date(t.received_at || t.timestamp).getTime()) <= 24 * 60 * 60 * 1000);
+    filtered = filtered.filter((t) => (now - getMs(t)) <= 24 * 60 * 60 * 1000);
   } else if (timeRange === '7d') {
-    filtered = filtered.filter((t) => (now - new Date(t.received_at || t.timestamp).getTime()) <= 7 * 24 * 60 * 60 * 1000);
+    filtered = filtered.filter((t) => (now - getMs(t)) <= 7 * 24 * 60 * 60 * 1000);
+  } else if (timeRange === '30d') {
+    filtered = filtered.filter((t) => (now - getMs(t)) <= 30 * 24 * 60 * 60 * 1000);
   }
 
-  res.json(dedupeTelemetryRecords(filtered).slice(-limit));
+  const uniqueMemory = dedupeTelemetryRecords(filtered);
+  res.setHeader('X-Data-Source', 'memory');
+  res.json(downsampleTelemetry(uniqueMemory, maxPoints));
 });
 
 // 4. Publish / Simulate Telemetry Packet
@@ -1401,26 +1428,29 @@ app.post('/api/telemetry/publish', async (req, res) => {
   }
 });
 
-// 5. CSV Export Endpoint - rentang 1 hari / 7 hari / 30 hari / semua
+// 5. CSV Export Endpoint - rentang 1j / 6j / 24j / 1 hari / 7 hari / 30 hari / semua
 app.get('/api/telemetry/export-csv', async (req, res) => {
   try {
-    type CsvRange = '1d' | '7d' | '30d' | 'all';
+    type CsvRange = '1h' | '6h' | '24h' | '1d' | '7d' | '30d' | 'all';
     const requestedRange = String(req.query.range || '7d').toLowerCase();
-    const allowedRanges = new Set<CsvRange>(['1d', '7d', '30d', 'all']);
+    const allowedRanges = new Set<CsvRange>(['1h', '6h', '24h', '1d', '7d', '30d', 'all']);
     const range: CsvRange = allowedRanges.has(requestedRange as CsvRange)
       ? requestedRange as CsvRange
       : '7d';
 
-    const rangeDays: Record<Exclude<CsvRange, 'all'>, number> = {
-      '1d': 1,
-      '7d': 7,
-      '30d': 30,
+    const rangeMs: Record<Exclude<CsvRange, 'all'>, number> = {
+      '1h': 1 * 60 * 60 * 1000,
+      '6h': 6 * 60 * 60 * 1000,
+      '24h': 24 * 60 * 60 * 1000,
+      '1d': 24 * 60 * 60 * 1000,
+      '7d': 7 * 24 * 60 * 60 * 1000,
+      '30d': 30 * 24 * 60 * 60 * 1000,
     };
 
     const now = Date.now();
     const since = range === 'all'
       ? null
-      : new Date(now - rangeDays[range] * 24 * 60 * 60 * 1000);
+      : new Date(now - rangeMs[range]);
 
     const getTelemetryTimeMs = (t: RiverTelemetry): number => {
       const raw = t.received_at || t.timestamp;
@@ -1495,6 +1525,9 @@ app.get('/api/telemetry/export-csv', async (req, res) => {
     // BOM UTF-8 membantu Excel mengenali encoding dengan benar.
     const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\n');
     const rangeLabel: Record<CsvRange, string> = {
+      '1h': '1jam',
+      '6h': '6jam',
+      '24h': '24jam',
       '1d': '1hari',
       '7d': '7hari',
       '30d': '30hari',
